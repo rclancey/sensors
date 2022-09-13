@@ -3,15 +3,12 @@ package api
 import (
 	//"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	//"os/exec"
 	//"path/filepath"
 	"time"
 
 	"github.com/rclancey/httpserver/v2"
-	"github.com/rclancey/logging"
-	"github.com/rclancey/sensors/tsl2591"
 	"github.com/warthog618/gpiod"
 	"github.com/warthog618/gpiod/device/rpi"
 )
@@ -29,7 +26,7 @@ type MotionSensor struct {
 	webhooks *ThresholdWebhookList
 }
 
-func NewMotionSensor(chipIdx, lineId int) (*MotionSensor, error) {
+func NewMotionSensor(cfg *httpserver.ServerConfig) (*MotionSensor, error) {
 	chipIdx := 0
 	lineId := rpi.GPIO17
 	line, err := gpiod.RequestLine(fmt.Sprintf("gpiochip%d", chipIdx), lineId)
@@ -40,7 +37,7 @@ func NewMotionSensor(chipIdx, lineId int) (*MotionSensor, error) {
 	if err != nil {
 		return nil, err
 	}
-	webhooks, err := NewTresholdWebhookList(fn)
+	webhooks, err := NewThresholdWebhookList(fn)
 	if err != nil {
 		return nil, err
 	}
@@ -48,14 +45,13 @@ func NewMotionSensor(chipIdx, lineId int) (*MotionSensor, error) {
 		cfg: cfg,
 		line: line,
 		webhooks: webhooks,
-		lock: &sync.Mutex{},
 	}, nil
 }
 
 func (ms *MotionSensor) Check() (float64, interface{}, error) {
 	val, err := ms.line.Value()
 	if err != nil {
-		return val, nil, err
+		return 0, nil, err
 	}
 	status := &MotionSensorStatus{
 		Now: time.Now().In(time.UTC),

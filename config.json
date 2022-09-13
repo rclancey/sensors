@@ -1,0 +1,13 @@
+{
+  "server_root": "$HOME/sensors",
+  "document_root": "build/vacation/htdocs",
+  "log": {
+    "level": "DEBUG"
+  },
+  "bind": {
+    "port": 8101,
+    "ssl": {
+      "disabled": true
+    }
+  }
+}

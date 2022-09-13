@@ -2,19 +2,17 @@ package api
 
 import (
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/pkg/errors"
-	"github.com/rclancey/httpserver/v2"
+	H "github.com/rclancey/httpserver/v2"
 	"github.com/rclancey/logging"
 )
 
 func APIMain() {
 	var errlog *logging.Logger
-	var srv *httpserver.Server
+	var srv *H.Server
 	var err error
 	shutdown := false
 	for !shutdown {
@@ -72,25 +70,22 @@ func colorizeLogger(l *logging.Logger) {
 	l.MakeDefault()
 }
 
-func startup() (*logging.Logger, *httpserver.Server, error) {
+func startup() (*logging.Logger, *H.Server, error) {
 	var err error
-	cfg, err = httpserver.Configure()
+	cfg, err := H.Configure()
 	if err != nil {
-		log.Println("error configuring server:", err)
-		return safeMode(nil, errors.Wrap(err, ErrInvalidConfiguration.Error()))
+		log.Fatalln("error configuring server:", err)
 	}
 	if cfg == nil {
-		log.Println("no configuration found")
-		return safeMode(nil, ErrNoConfiguration)
+		log.Fatalln("no configuration found")
 	}
 	errlog, err := cfg.Logging.ErrorLogger()
 	if err != nil {
-		log.Println("error configuring logging:", err)
-		return safeMode(cfg, errors.Wrap(err, ErrLoggingError.Error()))
+		log.Fatalln("error configuring logging:", err)
 	}
 	colorizeLogger(errlog)
 
-	srv, err := httpserver.NewServer(cfg)
+	srv, err := H.NewServer(cfg)
 	if err != nil {
 		log.Fatalln("can't create server:", err)
 	}
@@ -100,7 +95,7 @@ func startup() (*logging.Logger, *httpserver.Server, error) {
 		log.Fatalln("can't create light sensor:", err)
 	}
 
-	ms, err := NewMotionSensor(cfg.ServerConfig)
+	ms, err := NewMotionSensor(cfg)
 	if err != nil {
 		log.Fatalln("can't create motion sensor:", err)
 	}
@@ -112,12 +107,12 @@ func startup() (*logging.Logger, *httpserver.Server, error) {
 	})
 
 	errlog.Infoln("server starting...")
-	srv.GET("/light/status", ls.HandleRead)
-	srv.POST("/light/webhook", ls.HandleAddWebhook)
-	srv.DELETE("/light/webhook", ls.HandleRemoveWebhook)
-	srv.GET("/motion/status", ms.HandleRead)
-	srv.POST("/motion/webhook", ms.HandleAddWebhook)
-	srv.DELETE("/motion/webhook", ms.HandleRemoveWebhook)
+	srv.GET("/light/status", H.HandlerFunc(ls.HandleRead))
+	srv.POST("/light/webhook", H.HandlerFunc(ls.HandleAddWebhook))
+	srv.DELETE("/light/webhook", H.HandlerFunc(ls.HandleRemoveWebhook))
+	srv.GET("/motion/status", H.HandlerFunc(ms.HandleRead))
+	srv.POST("/motion/webhook", H.HandlerFunc(ms.HandleAddWebhook))
+	srv.DELETE("/motion/webhook", H.HandlerFunc(ms.HandleRemoveWebhook))
 	errlog.Infoln("server ready")
 
 	return errlog, srv, nil

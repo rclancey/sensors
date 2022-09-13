@@ -2,15 +2,22 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+var ErrInProgress = errors.New("webhook call already in progress")
 
 type Webhook interface {
 	Callback(body interface{}) error
@@ -61,7 +68,7 @@ func (hook *BaseWebhook) setParam(query url.Values, key string, val interface{})
 	case bool:
 		query.Add(key, strconv.FormatBool(v))
 	case int:
-		query.Add(key, strconv.Atoi(v))
+		query.Add(key, strconv.Itoa(v))
 	case float64:
 		query.Add(key, strconv.FormatFloat(v, 'f', -1, 64))
 	default:
@@ -82,7 +89,7 @@ func (hook *BaseWebhook) setParam(query url.Values, key string, val interface{})
 		case reflect.Map, reflect.Struct:
 			data, err := json.Marshal(val)
 			if err != nil {
-				return errr
+				return err
 			}
 			return hook.setParam(query, key, data)
 		case reflect.Ptr:
@@ -113,11 +120,11 @@ func (hook *BaseWebhook) Callback(body interface{}) error {
 	query := u.Query()
 	headers := http.Header{}
 	if hook.CallbackHeaders != nil {
-		headers = hoook.CallbackHeaders.Clone()
+		headers = hook.CallbackHeaders.Clone()
 	}
 	var reqBody io.ReadCloser
 	if body != nil {
-		switch u.CallbackMethod {
+		switch hook.CallbackMethod {
 		case http.MethodGet:
 			bodyJson, err := json.Marshal(body)
 			if err != nil {
@@ -140,7 +147,7 @@ func (hook *BaseWebhook) Callback(body interface{}) error {
 			if err != nil {
 				return err
 			}
-			reqBody = io.NopCloser(bytes.NewReader(data))
+			reqBody = ioutil.NopCloser(bytes.NewReader(data))
 			headers.Set("Content-Type", "application/json")
 		}
 	}
@@ -206,6 +213,7 @@ func (hook *ThresholdWebhook) Evaluate(val float64, data interface{}) error {
 			}
 		}
 	}
+	return nil
 }
 
 func (hook *ThresholdWebhook) Equals(other *ThresholdWebhook) bool {
@@ -232,8 +240,8 @@ type ThresholdWebhookList struct {
 }
 
 func NewThresholdWebhookList(fn string) (*ThresholdWebhookList, error) {
-	webhooks := []*TresholdWebhook{}
-	err = ReadJSONFile(fn, &webhooks)
+	webhooks := []*ThresholdWebhook{}
+	err := ReadJSONFile(fn, &webhooks)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}

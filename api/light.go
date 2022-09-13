@@ -3,18 +3,14 @@ package api
 import (
 	//"bytes"
 	//"encoding/json"
-	"fmt"
-	"log"
 	"net/http"
 	//"os/exec"
 	//"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/rclancey/httpserver/v2"
-	"github.com/rclancey/logging"
 	"github.com/rclancey/sensors/tsl2591"
-	"github.com/warthog618/gpiod"
-	"github.com/warthog618/gpiod/device/rpi"
 )
 
 type LightSensor struct {
