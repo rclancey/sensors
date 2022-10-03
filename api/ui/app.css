@@ -1,0 +1,56 @@
+body, div {
+  font-size: small;
+  color: white;
+  background-color: black;
+}
+
+div.status {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+div.status>div {
+  padding: 2em;
+}
+
+div.header {
+  font-size: larger;
+  font-weight: bold;
+  text-align: center;
+}
+
+div.asof {
+  margin-top: 0.5em;
+  font-size: smaller;
+  font-style: italic;
+  color: #ccc;
+  text-align: center;
+}
+
+div.grid {
+  display: grid;
+  grid-template-columns: auto auto;
+}
+
+div.grid div.key {
+  font-style: italic;
+  text-align: right;
+  padding-right: 0.5em;
+  white-space: nowrap;
+}
+
+div.network div.grid div.key {
+  font-family: monospace;
+}
+
+div.grid div.val {
+  font-variant: tabluar-nums;
+  text-align: left;
+  white-space: nowrap;
+}
+
+div.grid div.nval {
+  font-variant: tabluar-nums;
+  text-align: right;
+  white-space: nowrap;
+}

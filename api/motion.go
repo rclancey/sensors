@@ -8,6 +8,7 @@ import (
 	//"path/filepath"
 	"time"
 
+	"github.com/rclancey/generic"
 	"github.com/rclancey/httpserver/v2"
 	"github.com/warthog618/gpiod"
 	"github.com/warthog618/gpiod/device/rpi"
@@ -17,41 +18,52 @@ type MotionSensorStatus struct {
 	Now time.Time `json:"now"`
 	LastMotion time.Time `json:"last_motion"`
 	ElapsedTime float64 `json:"elapsed_time"`
+	MotionLog []time.Time `json:"motion_log"`
 }
 
 type MotionSensor struct {
-	cfg *httpserver.ServerConfig
+	cfg *Config
+	eventSink events.EventSink
 	line *gpiod.Line
 	lastMotion time.Time
-	webhooks *ThresholdWebhookList
+	lastStillness time.Time
 }
 
-func NewMotionSensor(cfg *httpserver.ServerConfig) (*MotionSensor, error) {
+func NewMotionSensor(cfg *Config, eventSink events.EventSink) (*MotionSensor, error) {
 	chipIdx := 0
 	lineId := rpi.GPIO17
 	line, err := gpiod.RequestLine(fmt.Sprintf("gpiochip%d", chipIdx), lineId)
 	if err != nil {
 		return nil, err
 	}
-	fn, err := cfg.Abs("motion-sensor-webhooks.json")
-	if err != nil {
-		return nil, err
-	}
-	webhooks, err := NewThresholdWebhookList(fn)
-	if err != nil {
-		return nil, err
-	}
-	return &MotionSensor{
+	ms := &MotionSensor{
 		cfg: cfg,
+		eventSink: events.NewPrefixedEventSource("motion", eventSink),
 		line: line,
-		webhooks: webhooks,
-	}, nil
+		lastMotion: time.Date(2000, time.January, 1, 0, 0, 0, 0, time.Local),
+	}
+	ms.registerEventTypes()
+	return ms, nil
 }
 
-func (ms *MotionSensor) Check() (float64, interface{}, error) {
+func (ms *MotionSensor) registerEventTypes() {
+	now := time.Now()
+	ms.eventSink.RegisterEventType("movement", &MotionSensorStatus{
+		Now: now,
+		LastMotion: now,
+		ElapsedTime: 0,
+	})
+	ms.eventSink.RegisterEventType("stillness", &MotionSensorStatus{
+		Now: now,
+		LastMotion: now.Add(-5 * time.Minute),
+		Elapsed: 300,
+	})
+}
+
+func (ms *MotionSensor) Check() (interface{}, error) {
 	val, err := ms.line.Value()
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
 	status := &MotionSensorStatus{
 		Now: time.Now().In(time.UTC),
@@ -60,38 +72,42 @@ func (ms *MotionSensor) Check() (float64, interface{}, error) {
 	}
 	if val != 0 {
 		ms.lastMotion = status.Now
+		ms.lastStillness = 0
 		status.LastMotion = status.Now
 	} else {
-		status.ElapsedTime = status.Now.Sub(status.LastMotion).Seconds()
+		elapsed := status.Now.Sub(status.LastMotion)
+		status.ElapsedTime = elapsed.Seconds()
+		durs := []time.Duration{
+			time.Minute,
+			5 * time.Minute,
+			15 * time.Minute,
+			30 * time.Minute,
+			time.Hour,
+			2 * time.Hour,
+			4 * time.Hour,
+			8 * time.Hour,
+			12 * time.Hour,
+			24 * time.Hour,
+			36 * time.Hour,
+			48 * time.Hour,
+			60 * time.Hour,
+			72 * time.Hour,
+		}
+		for _, dur := range durs {
+			if elapsed >= dur && ms.lastStillness < dur {
+				ms.eventSink.Emit("stillness", status)
+				ms.lastStillness = elapsed
+			}
+		}
 	}
-	return status.ElapsedTime, status, nil
+	return status, nil
 }
 
-func (ms *MotionSensor) Monitor(interval time.Duration) {
-	go ms.webhooks.Monitor(ms, interval)
+func (ms *MotionSensor) Monitor(interval time.Duration) func() {
+	return Monitor(ms, interval)
 }
 
 func (ms *MotionSensor) HandleRead(w http.ResponseWriter, r *http.Request) (interface{}, error) {
 	_, data, err := ms.Check()
 	return data, err
-}
-
-func (ms *MotionSensor) HandleAddWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	webhook := &ThresholdWebhook{}
-	err := httpserver.ReadJSON(r, webhook)
-	if err != nil {
-		return nil, err
-	}
-	ms.webhooks.RegisterWebhook(webhook)
-	return ms.webhooks.List(), nil
-}
-
-func (ms *MotionSensor) HandleRemoveWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	webhook := &ThresholdWebhook{}
-	err := httpserver.ReadJSON(r, webhook)
-	if err != nil {
-		return nil, err
-	}
-	ms.webhooks.UnregisterWebhook(webhook)
-	return ms.webhooks.List(), nil
 }

@@ -1,14 +1,21 @@
 package api
 
 import (
+	"embed"
+	//"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	H "github.com/rclancey/httpserver/v2"
 	"github.com/rclancey/logging"
 )
+
+//go:embed ui/*
+var ui embed.FS
 
 func APIMain() {
 	var errlog *logging.Logger
@@ -72,7 +79,7 @@ func colorizeLogger(l *logging.Logger) {
 
 func startup() (*logging.Logger, *H.Server, error) {
 	var err error
-	cfg, err := H.Configure()
+	cfg, err := Configure()
 	if err != nil {
 		log.Fatalln("error configuring server:", err)
 	}
@@ -85,35 +92,131 @@ func startup() (*logging.Logger, *H.Server, error) {
 	}
 	colorizeLogger(errlog)
 
-	srv, err := H.NewServer(cfg)
+	srv, err := H.NewServer(cfg.ServerConfig)
 	if err != nil {
 		log.Fatalln("can't create server:", err)
 	}
 
-	ls, err := NewLightSensor(cfg)
+	bs, err := NewBrightnessSensor(cfg.ServerConfig)
 	if err != nil {
-		log.Fatalln("can't create light sensor:", err)
+		log.Fatalln("can't create brightness sensor:", err)
 	}
+	bs.Monitor(time.Minute)
 
-	ms, err := NewMotionSensor(cfg)
+	ms, err := NewMotionSensor(cfg.ServerConfig)
 	if err != nil {
 		log.Fatalln("can't create motion sensor:", err)
 	}
+	ms.Monitor(500 * time.Millisecond)
+
+	ls, err := NewLightStatus(cfg.ServerConfig)
+	if err != nil {
+		log.Fatalln("can't create light status:", err)
+	}
+	ls.Monitor(time.Minute)
+
+	atv, err := NewAppleTV(cfg)
+	if err != nil {
+		log.Fatalln("can't create appletv:", err)
+	}
+	atv.Monitor(time.Second)
+
+	sonos, err := NewSonos(cfg)
+	if err != nil {
+		log.Fatalln("can't create sonos:", err)
+	}
+	sonos.Monitor(5 * time.Second)
+
+	ns, err := NewNetworkStatus(cfg)
+	if err != nil {
+		log.Fatalln("can't create network:", err)
+	}
+	ns.Monitor(5 * time.Minute)
+
+	go func() {
+		log.Println("running initial checks...")
+		bs.Check()
+		log.Println("brightness")
+		ms.Check()
+		log.Println("motion")
+		ls.Check()
+		log.Println("lights")
+		sonos.Check()
+		log.Println("sonos")
+		atv.Check()
+		log.Println("appletv")
+		ns.Check()
+		log.Println("network")
+	}()
 
 	srv.RegisterOnShutdown(func() {
 		log.Println("cleanup globals on shutdown")
-		ls.webhooks.Stop()
+		bs.webhooks.Stop()
 		ms.webhooks.Stop()
 	})
 
+	/*
+	uifs, err := fs.Sub(ui, "ui")
+	if err != nil {
+		log.Fatal(err)
+	}
+	*/
 	errlog.Infoln("server starting...")
-	srv.GET("/light/status", H.HandlerFunc(ls.HandleRead))
-	srv.POST("/light/webhook", H.HandlerFunc(ls.HandleAddWebhook))
-	srv.DELETE("/light/webhook", H.HandlerFunc(ls.HandleRemoveWebhook))
+	srv.GET("/brightness/status", H.HandlerFunc(bs.HandleRead))
+	srv.GET("/brightness/webhook", H.HandlerFunc(bs.HandleListWebhooks))
+	srv.POST("/brightness/webhook", H.HandlerFunc(bs.HandleAddWebhook))
+	srv.DELETE("/brightness/webhook", H.HandlerFunc(bs.HandleRemoveWebhook))
+
 	srv.GET("/motion/status", H.HandlerFunc(ms.HandleRead))
+	srv.GET("/motion/webhook", H.HandlerFunc(ms.HandleListWebhooks))
 	srv.POST("/motion/webhook", H.HandlerFunc(ms.HandleAddWebhook))
 	srv.DELETE("/motion/webhook", H.HandlerFunc(ms.HandleRemoveWebhook))
+
+	srv.GET("/lights/status", H.HandlerFunc(ls.HandleRead))
+	srv.GET("/lights/webhook", H.HandlerFunc(ls.HandleListWebhooks))
+	srv.POST("/lights/webhook", H.HandlerFunc(ls.HandleAddWebhook))
+	srv.DELETE("/lights/webhook", H.HandlerFunc(ls.HandleRemoveWebhook))
+	srv.PUT("/lights/", H.HandlerFunc(ls.HandlePut))
+
+	srv.GET("/sonos/status", H.HandlerFunc(sonos.HandleRead))
+	srv.GET("/sonos/swebhook", H.HandlerFunc(sonos.HandleListWebhooks))
+	srv.POST("/sonos/webhook", H.HandlerFunc(sonos.HandleAddWebhook))
+	srv.DELETE("/sonos/webhook", H.HandlerFunc(sonos.HandleRemoveWebhook))
+
+	srv.GET("/network/status", H.HandlerFunc(ns.HandleRead))
+	srv.GET("/network/swebhook", H.HandlerFunc(ns.HandleListWebhooks))
+	srv.POST("/network/webhook", H.HandlerFunc(ns.HandleAddWebhook))
+	srv.DELETE("/network/webhook", H.HandlerFunc(ns.HandleRemoveWebhook))
+
+	srv.GET("/status", indexFunc(map[string]sensor{
+		"brightness": bs,
+		"motion": ms,
+		"lights": ls,
+		"appletv": atv,
+		"sonos": sonos,
+		"network": ns,
+	}))
+	//srv.GET("/", http.FileServer(http.FS(uifs)))
 	errlog.Infoln("server ready")
 
 	return errlog, srv, nil
+}
+
+type sensor interface {
+	HandleRead(http.ResponseWriter, *http.Request) (interface{}, error)
+}
+
+func indexFunc(sensors map[string]sensor) H.HandlerFunc {
+	return H.HandlerFunc(func(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+		resp := map[string]interface{}{}
+		for k, h := range sensors {
+			v, err := h.HandleRead(w, r)
+			if err != nil {
+				resp[k] = map[string]interface{}{"error": err.Error()}
+			} else {
+				resp[k] = v
+			}
+		}
+		return resp, nil
+	})
 }

@@ -17,239 +17,171 @@ import (
 	"time"
 )
 
-var ErrInProgress = errors.New("webhook call already in progress")
-
-type Webhook interface {
-	Callback(body interface{}) error
+type WebhookWithID struct {
+	*events.Webhook
+	id int64
 }
 
-type BaseWebhook struct {
-	CallbackMethod string `json:"callback_method,omitempty"`
-	CallbackURL string `json:"callback_url"`
-	CallbackHeaders http.Header `json:"callback_headers,omitempty"`
-	working bool
-}
-
-func (hook *BaseWebhook) Equals(other *BaseWebhook) bool {
-	if hook.CallbackMethod != other.CallbackMethod {
-		return false
-	}
-	if hook.CallbackURL != other.CallbackURL {
-		return false
-	}
-	if hook.CallbackHeaders == nil || len(hook.CallbackHeaders) == 0 {
-		if other.CallbackHeaders != nil && len(other.CallbackHeaders) != 0 {
-			return false
-		}
-		return true
-	}
-	if other.CallbackHeaders == nil || len(other.CallbackHeaders) == 0 {
-		return false
-	}
-	delim := "\n\n"
-	for k, vs := range hook.CallbackHeaders {
-		otherVs := other.CallbackHeaders.Values(k)
-		if len(vs) != len(otherVs) {
-			return false
-		}
-		if strings.Join(vs, delim) != strings.Join(otherVs, delim) {
-			return false
-		}
-	}
-	return true
-}
-
-func (hook *BaseWebhook) setParam(query url.Values, key string, val interface{}) error {
-	switch v := val.(type) {
-	case string:
-		query.Add(key, v)
-	case []byte:
-		query.Add(key, string(v))
-	case bool:
-		query.Add(key, strconv.FormatBool(v))
-	case int:
-		query.Add(key, strconv.Itoa(v))
-	case float64:
-		query.Add(key, strconv.FormatFloat(v, 'f', -1, 64))
-	default:
-		rv := reflect.ValueOf(val)
-		switch rv.Kind() {
-		case reflect.Slice, reflect.Array:
-			n := rv.Len()
-			for i := 0; i < n; i += 1 {
-				err := hook.setParam(query, key, rv.Index(i).Interface())
-				if err != nil {
-					return err
-				}
-			}
-		case reflect.Int64, reflect.Int32, reflect.Int16, reflect.Int8:
-			return hook.setParam(query, key, int(rv.Int()))
-		case reflect.Uint64, reflect.Uint32, reflect.Uint16, reflect.Uint8:
-			return hook.setParam(query, key, int(rv.Uint()))
-		case reflect.Map, reflect.Struct:
-			data, err := json.Marshal(val)
-			if err != nil {
-				return err
-			}
-			return hook.setParam(query, key, data)
-		case reflect.Ptr:
-			if rv.IsNil() {
-				return hook.setParam(query, key, "null")
-			}
-			return hook.setParam(query, key, rv.Elem().Interface())
-		default:
-			return fmt.Errorf("unhandled param type: %T", val)
-		}
-	}
-	return nil
-}
-
-func (hook *BaseWebhook) Callback(body interface{}) error {
-	if hook.working {
-		return ErrInProgress
-	}
-	hook.working = true
-	defer func() {
-		hook.working = false
-	}()
-
-	u, err := url.Parse(hook.CallbackURL)
-	if err != nil {
-		return err
-	}
-	query := u.Query()
-	headers := http.Header{}
-	if hook.CallbackHeaders != nil {
-		headers = hook.CallbackHeaders.Clone()
-	}
-	var reqBody io.ReadCloser
-	if body != nil {
-		switch hook.CallbackMethod {
-		case http.MethodGet:
-			bodyJson, err := json.Marshal(body)
-			if err != nil {
-				return err
-			}
-			bodyMap := map[string]interface{}{}
-			err = json.Unmarshal(bodyJson, &bodyMap)
-			if err != nil {
-				return err
-			}
-			for k, iv := range bodyMap {
-				err = hook.setParam(query, k, iv)
-				if err != nil {
-					return err
-				}
-			}
-			u.RawQuery = query.Encode()
-		case http.MethodPost, http.MethodPut:
-			data, err := json.Marshal(body)
-			if err != nil {
-				return err
-			}
-			reqBody = ioutil.NopCloser(bytes.NewReader(data))
-			headers.Set("Content-Type", "application/json")
-		}
-	}
-	req, err := http.NewRequest(hook.CallbackMethod, u.String(), reqBody)
-	if err != nil {
-		return err
-	}
-	c := &http.Client{}
-	res, err := c.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != 200 {
-		return fmt.Errorf("HTTP %d: %s", res.StatusCode, res.Status)
-	}
-	return nil
-}
-
-type ThresholdDirection string
-const (
-	ThresholdDirectionIncreasing = "increasing"
-	ThresholdDirectionDecreasing = "decreasing"
-)
-
-type ThresholdWebhook struct {
-	*BaseWebhook
-	Direction ThresholdDirection `json:"direction"`
-	TriggerThreshold float64 `json:"trigger_threshold"`
-	ResetThreshold float64 `json:"reset_threshold"`
-	triggered bool
-}
-
-func (hook *ThresholdWebhook) Evaluate(val float64, data interface{}) error {
-	if hook.triggered {
-		switch hook.Direction {
-		case ThresholdDirectionDecreasing:
-			if val >= hook.ResetThreshold {
-				hook.triggered = false
-			}
-		case ThresholdDirectionIncreasing:
-			if val <= hook.ResetThreshold {
-				hook.triggered = false
-			}
-		}
-	} else {
-		switch hook.Direction {
-		case ThresholdDirectionDecreasing:
-			if val <= hook.TriggerThreshold {
-				err := hook.Callback(data)
-				if err != nil {
-					return err
-				}
-				hook.triggered = true
-			}
-		case ThresholdDirectionIncreasing:
-			if val >= hook.TriggerThreshold {
-				err := hook.Callback(data)
-				if err != nil {
-					return err
-				}
-				hook.triggered = true
-			}
-		}
-	}
-	return nil
-}
-
-func (hook *ThresholdWebhook) Equals(other *ThresholdWebhook) bool {
-	if !hook.BaseWebhook.Equals(other.BaseWebhook) {
-		return false
-	}
-	if hook.Direction != other.Direction {
-		return false
-	}
-	if hook.TriggerThreshold != other.TriggerThreshold {
-		return false
-	}
-	if hook.ResetThreshold != other.ResetThreshold {
-		return false
-	}
-	return true
-}
-
-type ThresholdWebhookList struct {
+type WebhookList struct {
 	fn string
-	webhooks []*ThresholdWebhook
-	stop chan bool
-	lock *sync.Mutex
+	eventSink events.EventSink
+	mutex *sync.Mutex
+	hooks map[string]map[]*WebhookWithID
 }
 
-func NewThresholdWebhookList(fn string) (*ThresholdWebhookList, error) {
-	webhooks := []*ThresholdWebhook{}
-	err := ReadJSONFile(fn, &webhooks)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+func NewWebhookList(cfg *Config, eventSink events.EventSink) (*WebhookList, error) {
+	fn := cfg.Abs("var/webhooks.json")
+	hooks := map[string][]*WebhookWithID{}
+	f, err := os.Open(fn)
+	if err == nil {
+		defer f.Close()
+		data, err := ioutil.ReadAll(f)
+		if err != nil {
+			return nil, err
+		}
+		err = json.Unmarshal(data, &hooks)
+		if err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	return &ThresholdWebhookList{
+	whl := &WebhookList{
+		eventSink: eventSink,
 		fn: fn,
-		webhooks: webhooks,
-		lock: &sync.Mutex{},
-	}, nil
+		mutex: &sync.Mutex{},
+		hooks: map[string][]*WebhookWithID{},
+	}
+	onRemove := events.NewEventHandler(func(ev events.Event) error {
+		evData, ok := ev.GetData().(*events.ListenerMeta)
+		if !ok {
+			return nil
+		}
+		return whl.remove(evData.EventType, evData.HandlerID)
+	})
+	eventSink.AddEventListener(events.EventTypeHandlerRemoved, onRemove)
+	for eventType, webhooks := range hooks {
+		for _, webhook := range webhooks {
+			handler := webhook.Handler()
+			webhook.id = handler.ID()
+			eventSink.AddEventListener(eventType, handler)
+		}
+	}
+	return whl, nil
+}
+
+func (whl *WebhookList) Save() error {
+	tmpfn := whl.fn+".tmp"
+	f, err := os.Create(tmpfn)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	whl.mutex.Lock()
+	err = enc.Encode(whl.hooks)
+	whl.mutex.Unlock()
+	if err != nil {
+		f.Close()
+		return err
+	}
+	err = f.Close()
+	if err != nil {
+		return err
+	}
+	err = os.Rename(tmpfn, whl.fn)
+	return err
+}
+
+func (whl *WebhookList) remove(eventType string, handlerId int64) error {
+	whl.mutex.Lock()
+	hooks := whl.hooks[eventType]
+	out := make([]*WebhookWithID, 0, len(hooks))
+	for _, hook := range hooks {
+		if hook.id != handlerId {
+			out = append(out, hook)
+		}
+	}
+	if len(out) == 0 {
+		delete(whl.hooks, eventType)
+	} else {
+		whl.hooks[eventType] = out
+	}
+	whl.mutex.Unlock()
+	return whl.Save()
+}
+
+func (whl *WebhookList) add(eventType string, hook *events.Webhook) error {
+	handler := hook.Handler()
+	whl.eventSink.AddEventListener(eventType, handler)
+	whl.mutex.Lock()
+	whl.hooks[eventType] = append(whl.hooks[eventType], &WebhookWithID{hook, handler.ID()})
+	whl.mutex.Unlock()
+	return whl.Save()
+}
+
+func (whl *WebhookList) HandleAddWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+	eventType := r.URL.Query().Get("event_type")
+	if eventType == "" {
+		return nil, httpserver.BadRequest.New("missing event type")
+	}
+	hook := &events.Webhook{}
+	err := httpserver.ReadJSON(r, hook)
+	if err != nil {
+		return nil, err
+	}
+	err := whl.add(eventType, hook)
+	if err != nil {
+		return nil, err
+	}
+	return hook, nil
+}
+
+func (whl *WebhookList) HandleRemoveWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+	eventType := r.URL.Query().Get("event_type")
+	if eventType == "" {
+		return nil, httpserver.BadRequest.New("missing event type")
+	}
+	hook := &events.Webhook{}
+	err := httpserver.ReadJSON(r, hook)
+	if err != nil {
+		return nil, err
+	}
+	ids := []int64{}
+	whl.mutex.Lock()
+	hooks := whl.hooks[eventType]
+	whl.mutex.Unlock()
+	for _, xhook := range hooks {
+		if xhook.Equals(hook) {
+			ids = append(ids, xhook.id)
+		}
+	}
+	for _, id := range ids {
+		whl.eventSink.RemoveEventListener(eventType, events.HandlerReference(id))
+	}
+	return hook, nil
+}
+
+func (whl *WebhookList) HandleListWebhooks(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+	eventType := r.URL.Query().Get("event_type")
+	var out []byte
+	var err error
+	whl.mutex.Lock()
+	if eventType == "" {
+		out, err = json.Marshal(whl.hooks)
+	} else {
+		out, err = json.Marshal(whl.hooks[eventType])
+	}
+	whl.mutex.Unlock()
+	return out, err
+}
+
+func (whl *WebhookList) HandleListEventTypes(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+	return whl.eventSink.ListEventTypes(), nil
+}
+
+func (whl *WebhookList) HandleEventLog(w http.ResponseWriter, w *http.Request) (interface{}, error) {
+	return whl.eventSink.Log(), nil
 }
 
 func (twl *ThresholdWebhookList) Save() error {
