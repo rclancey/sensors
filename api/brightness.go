@@ -9,7 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rclancey/httpserver/v2"
+	"github.com/rclancey/events"
+	//"github.com/rclancey/httpserver/v2"
 	"github.com/rclancey/sensors/tsl2591"
 )
 
@@ -37,28 +38,34 @@ func NewBrightnessSensor(cfg *Config, eventSink events.EventSink) (*BrightnessSe
 	if err != nil {
 		return nil, err
 	}
-	fn, err := cfg.Abs("brightness-sensor-webhooks.json")
-	if err != nil {
-		return nil, err
-	}
-	webhooks, err := NewThresholdWebhookList(fn)
-	if err != nil {
-		return nil, err
-	}
-	return &BrightnessSensor{
+	bright := &BrightnessSensor{
 		cfg: cfg,
 		sensor: sensor,
 		eventSink: sink,
 		lock: &sync.Mutex{},
-	}, nil
+	}
+	bright.registerEventTypes()
+	return bright, nil
+}
+
+func (bright *BrightnessSensor) registerEventTypes() {
+	bright.eventSink.RegisterEventType(events.NewEvent("measurement", &BrightnessReading{
+		&tsl2591.SensorData{
+			Lux: 891,
+			Infrared: 283,
+			Visible: 5439688,
+			FullSpectrum: 5439771,
+		},
+		time.Now().In(time.UTC),
+	}))
 }
 
 func (bright *BrightnessSensor) Check() (interface{}, error) {
 	reading, err := bright.sensor.ReadSensorData()
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
-	bright.lastReading = &BrightnessReading{reading, time.Now()}
+	bright.lastReading = &BrightnessReading{reading, time.Now().In(time.UTC)}
 	bright.eventSink.Emit("measurement", bright.lastReading)
 	return bright.lastReading, nil
 }

@@ -1,20 +1,23 @@
 package api
 
 import (
-	"bytes"
+	//"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
+	//"fmt"
+	//"io"
 	"io/ioutil"
 	"net/http"
-	"net/url"
+	//"net/url"
 	"os"
-	"reflect"
-	"strconv"
-	"strings"
+	//"reflect"
+	//"strconv"
+	//"strings"
 	"sync"
-	"time"
+	//"time"
+
+	"github.com/rclancey/events"
+	"github.com/rclancey/httpserver/v2"
 )
 
 type WebhookWithID struct {
@@ -26,11 +29,14 @@ type WebhookList struct {
 	fn string
 	eventSink events.EventSink
 	mutex *sync.Mutex
-	hooks map[string]map[]*WebhookWithID
+	hooks map[string][]*WebhookWithID
 }
 
 func NewWebhookList(cfg *Config, eventSink events.EventSink) (*WebhookList, error) {
-	fn := cfg.Abs("var/webhooks.json")
+	fn, err := cfg.Abs("var/webhooks.json")
+	if err != nil {
+		return nil, err
+	}
 	hooks := map[string][]*WebhookWithID{}
 	f, err := os.Open(fn)
 	if err == nil {
@@ -130,7 +136,7 @@ func (whl *WebhookList) HandleAddWebhook(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return nil, err
 	}
-	err := whl.add(eventType, hook)
+	err = whl.add(eventType, hook)
 	if err != nil {
 		return nil, err
 	}
@@ -180,106 +186,6 @@ func (whl *WebhookList) HandleListEventTypes(w http.ResponseWriter, r *http.Requ
 	return whl.eventSink.ListEventTypes(), nil
 }
 
-func (whl *WebhookList) HandleEventLog(w http.ResponseWriter, w *http.Request) (interface{}, error) {
+func (whl *WebhookList) HandleEventLog(w http.ResponseWriter, r *http.Request) (interface{}, error) {
 	return whl.eventSink.Log(), nil
 }
-
-func (twl *ThresholdWebhookList) Save() error {
-	data, err := json.Marshal(twl.webhooks)
-	if err != nil {
-		return err
-	}
-	f, err := os.Create(twl.fn)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(data)
-	return err
-}
-
-func (twl *ThresholdWebhookList) RegisterWebhook(webhook *ThresholdWebhook) {
-	twl.lock.Lock()
-	defer twl.lock.Unlock()
-	if webhook.BaseWebhook.CallbackMethod == "" {
-		webhook.BaseWebhook.CallbackMethod = http.MethodGet
-	}
-	for _, hook := range twl.webhooks {
-		if hook.Equals(webhook) {
-			return
-		}
-	}
-	twl.webhooks = append(twl.webhooks, webhook)
-	twl.Save()
-}
-
-func (twl *ThresholdWebhookList) UnregisterWebhook(webhook *ThresholdWebhook) {
-	twl.lock.Lock()
-	defer twl.lock.Unlock()
-	out := make([]*ThresholdWebhook, 0, len(twl.webhooks))
-	for _, hook := range twl.webhooks {
-		if !hook.Equals(webhook) {
-			out = append(out, hook)
-		}
-	}
-	twl.webhooks = out
-	twl.Save()
-}
-
-func (twl *ThresholdWebhookList) List() []*ThresholdWebhook {
-	twl.lock.Lock()
-	defer twl.lock.Unlock()
-	webhooks := make([]*ThresholdWebhook, len(twl.webhooks))
-	copy(webhooks, twl.webhooks)
-	return webhooks
-}
-
-func (twl *ThresholdWebhookList) Evaluate(val float64, data interface{}) {
-	webhooks := twl.List()
-	for _, webhook := range webhooks {
-		hook := webhook
-		go hook.Evaluate(val, data)
-	}
-}
-
-func (twl *ThresholdWebhookList) Monitor(sensor Sensor, interval time.Duration) {
-	stop := twl.restart()
-	ticker := time.NewTicker(interval)
-	for {
-		select {
-		case <-ticker.C:
-			val, data, err := sensor.Check()
-			if err == nil {
-				twl.Evaluate(val, data)
-			}
-		case <-stop:
-			ticker.Stop()
-			return
-		}
-	}
-}
-
-func (twl *ThresholdWebhookList) realStop() {
-	stop := twl.stop
-	twl.stop = nil
-	if stop != nil {
-		stop <- true
-		close(stop)
-	}
-}
-
-func (twl *ThresholdWebhookList) restart() chan bool {
-	twl.lock.Lock()
-	defer twl.lock.Unlock()
-	twl.realStop()
-	stop := make(chan bool)
-	twl.stop = stop
-	return stop
-}
-
-func (twl *ThresholdWebhookList) Stop() {
-	twl.lock.Lock()
-	defer twl.lock.Unlock()
-	twl.realStop()
-}
-

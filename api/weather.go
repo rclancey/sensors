@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rclancey/events"
 	"github.com/rclancey/httpserver/v2"
 	"github.com/rclancey/openweathermap"
 )
@@ -18,22 +19,17 @@ type Weather struct {
 	client *openweathermap.OpenWeatherMapClient
 	lat float64
 	lon float64
-	webhooks *ThresholdWebhookList
+	eventSink events.EventSink
 	stop chan bool
 	lock *sync.Mutex
 	lastReading *openweathermap.Forecast
 }
 
-func NewWeather(cfg *Config) (*Weather, error) {
-	fn, err := cfg.Abs("weather-webhooks.json")
+func NewWeather(cfg *Config, eventSink events.EventSink) (*Weather, error) {
+	cacheDir, err := cfg.Abs("var/cache/openweathermap.org")
 	if err != nil {
 		return nil, err
 	}
-	webhooks, err := NewThresholdWebhookList(fn)
-	if err != nil {
-		return nil, err
-	}
-	cacheDir := cfg.Abs("var/cache/openweathermap.org")
 	err = httpserver.EnsureDir(cacheDir)
 	if err != nil {
 		return nil, err
@@ -43,24 +39,48 @@ func NewWeather(cfg *Config) (*Weather, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Weather{
+	weather := &Weather{
 		cfg: cfg,
 		client: client,
-		webhooks: webhooks,
+		eventSink: events.NewPrefixedEventSource("weather", eventSink),
 		lock: &sync.Mutex{},
-	}, nil
+	}
+	weather.registerEventTypes()
+	return weather, nil
 }
 
-func (weather *Weather) SetLocation(lat, lon float64) {
-	if lat != weather.lat || lon != weather.lon {
-		weather.lat = lat
-		weather.lon = lon
-		weather.lastReading = nil
-		weather.Check()
+func (w *Weather) registerEventTypes() {
+	w.eventSink.RegisterEventType(events.NewEvent("location", map[string]float64{"lat": w.lat, "lon": w.lon}))
+	forecast := w.lastReading
+	w.eventSink.RegisterEventType(events.NewEvent("forecast", forecast))
+	w.eventSink.RegisterEventType(events.NewEvent("pressure", &ValueWithUnits{"pressure", forecast.Current.PressureHPa, "hPa"}))
+	w.eventSink.RegisterEventType(events.NewEvent("humidity", &ValueWithUnits{"humidity", forecast.Current.HumidityPct, "%"}))
+	w.eventSink.RegisterEventType(events.NewEvent("dewpoint", &ValueWithUnits{"dew_point", forecast.Current.DewPointK, "K"}))
+	w.eventSink.RegisterEventType(events.NewEvent("clouds", &ValueWithUnits{"clouds", forecast.Current.CloudPct, "%"}))
+	w.eventSink.RegisterEventType(events.NewEvent("temp", &ValueWithUnits{"temp", forecast.Current.TempK, "K"}))
+	w.eventSink.RegisterEventType(events.NewEvent("rain", &ValueWithUnits{"rain", forecast.Current.Rain.Last3HoursMm / 3, "mm/h"}))
+	if len(forecast.Daily) > 0 {
+		daily := forecast.Daily[0]
+		w.eventSink.RegisterEventType(events.NewEvent("low", &ValueWithUnits{"temp_min", daily.Temp.MinK, "K"}))
+		w.eventSink.RegisterEventType(events.NewEvent("high", &ValueWithUnits{"temp_max", daily.Temp.MaxK, "K"}))
+		w.eventSink.RegisterEventType(events.NewEvent("pop", &ValueWithUnits{"pop", daily.PrecipitationPct, "%"}))
+	}
+	w.eventSink.RegisterEventType(events.NewEvent("rain-status", "stopped"))
+	w.eventSink.RegisterEventType(events.NewEvent("alert", &openweathermap.Alert{}))
+}
+
+func (w *Weather) SetLocation(lat, lon float64) {
+	if lat != w.lat || lon != w.lon {
+		w.lat = lat
+		w.lon = lon
+		w.lastReading = nil
+		w.eventSink.Emit("location", map[string]float64{"lat": w.lat, "lon": w.lon})
+		w.Check()
 	}
 }
 
 type ValueWithUnits struct {
+	Name string
 	Value float64
 	Units string
 }
@@ -69,70 +89,49 @@ func (v *ValueWithUnits) GetValue() float64 {
 	return v.Value
 }
 
-func (weather *Weather) Check() (float64, interface{}, error) {
-	if weather.lat == 0 && weather.lon == 0 {
-		return 0, nil, nil
+func (w *Weather) Check() (interface{}, error) {
+	if w.lat == 0 && w.lon == 0 {
+		return nil, nil
 	}
-	forecast, err := weather.client.Forecast(weather.lat, weather.lon)
+	forecast, err := w.client.Forecast(w.lat, w.lon)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
-	prev := weather.lastReading
-	weather.lastReading = forecast
-	weather.EmitEvent("forecast", forecast)
-	weather.EmitEvent("pressure", &ValueWithUnits{forecast.Current.PressureHPA, "hPa"})
-	weather.EmitEvent("humidity", &ValueWithUnits{forecast.Current.HumidityPct, "%"})
-	weather.EmitEvent("dewpoint", &ValueWithUnits{forecast.Current.DewPointK, "K"})
-	weather.EmitEvent("clouds", &ValueWithUnits{forecast.Current.CloudPct, "%"})
-	weather.EmitEvent("temperature", &ValueWithUnits{forecast.Current.TempK, "K"})
-	weather.EmitEvent("rain", &ValueWithUnits{forecast.Current.Rain.Last3HoursMm / 3, "mm/h"})
+	if forecast == nil {
+		return nil, nil
+	}
+	prev := w.lastReading
+	w.lastReading = forecast
+	w.eventSink.Emit("forecast", forecast)
+	w.eventSink.Emit("pressure", &ValueWithUnits{"pressure", forecast.Current.PressureHPa, "hPa"})
+	w.eventSink.Emit("humidity", &ValueWithUnits{"humidity", forecast.Current.HumidityPct, "%"})
+	w.eventSink.Emit("dewpoint", &ValueWithUnits{"dew_point", forecast.Current.DewPointK, "K"})
+	w.eventSink.Emit("clouds", &ValueWithUnits{"clouds", forecast.Current.CloudPct, "%"})
+	w.eventSink.Emit("temp", &ValueWithUnits{"temp", forecast.Current.TempK, "K"})
+	w.eventSink.Emit("rain", &ValueWithUnits{"rain", forecast.Current.Rain.Last3HoursMm / 3, "mm/h"})
 	if len(forecast.Daily) > 0 {
 		daily := forecast.Daily[0]
-		weather.EmitEvent("low", &ValueWithUnits{daily.Temp.MinK, "K"})
-		weather.EmitEvent("high", &ValueWithUnits{daily.Temp.MaxK, "K"})
-		weather.EmitEvent("precipitation", &ValueWithUnits{daily.PrecipitationPct, "%"})
+		w.eventSink.Emit("low", &ValueWithUnits{"temp_min", daily.Temp.MinK, "K"})
+		w.eventSink.Emit("high", &ValueWithUnits{"temp_max", daily.Temp.MaxK, "K"})
+		w.eventSink.Emit("pop", &ValueWithUnits{"pop", daily.PrecipitationPct, "%"})
 	}
-	if prev != nil && prev.Current != nil && forecast.Current != nil {
+	if prev != nil {
 		if prev.Current.Rain.LastHourMm > 0 && forecast.Current.Rain.LastHourMm == 0 {
-			weather.EmitEvent("rain-status", "stopped")
+			w.eventSink.Emit("rain-status", "stopped")
 		} else if prev.Current.Rain.LastHourMm == 0 && forecast.Current.Rain.LastHourMm > 0 {
-			weather.EmitEvent("rain-status", "started")
+			w.eventSink.Emit("rain-status", "started")
 		}
 	}
 	for _, alert := range forecast.Alerts {
-		weather.EmitEvent("alert", alert)
+		w.eventSink.Emit("alert", alert)
 	}
+	return forecast, nil
 }
 
-func (weather *Weather) Monitor(interval time.Duration) {
-	go weather.webhooks.Monitor(weather, interval)
+func (w *Weather) Monitor(interval time.Duration) func() {
+	return Monitor(w, interval)
 }
 
 func (weather *Weather) HandleRead(w http.ResponseWriter, r *http.Request) (interface{}, error) {
 	return weather.lastReading, nil
 }
-
-func (weather *Weather) HandleListWebhooks(w  http.ResponseWriter, r *http.Request) (interface{}, error) {
-	return weather.webhooks, nil
-}
-
-func (weather *Weather) HandleAddWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	webhook := &ThresholdWebhook{}
-	err := httpserver.ReadJSON(r, webhook)
-	if err != nil {
-		return nil, err
-	}
-	weather.webhooks.RegisterWebhook(webhook)
-	return weather.webhooks.List(), nil
-}
-
-func (weather *Weather) HandleRemoveWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	webhook := &ThresholdWebhook{}
-	err := httpserver.ReadJSON(r, webhook)
-	if err != nil {
-		return nil, err
-	}
-	weather.webhooks.UnregisterWebhook(webhook)
-	return weather.webhooks.List(), nil
-}
-

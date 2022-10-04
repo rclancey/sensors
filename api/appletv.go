@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rclancey/httpserver/v2"
+	"github.com/rclancey/events"
+	//"github.com/rclancey/httpserver/v2"
 )
 
 /*
@@ -100,7 +101,7 @@ type AppleTVStatus struct {
 	LastUpdate        time.Time `json:"now,omitempty"`
 }
 
-func (state *AppleTVStatus) Clone() *AppleTVStattusl {
+func (state *AppleTVStatus) Clone() *AppleTVStatus {
 	clone := *state
 	return &clone
 }
@@ -178,8 +179,12 @@ func stringp(s string) *string {
 	return &s
 }
 
+func intp(i int) *int {
+	return &i
+}
+
 func NewAppleTV(cfg *Config, eventSink events.EventSink) (*AppleTV, error) {
-	sink := events.NewPrefixedEventSink("appletv", eventSink)
+	sink := events.NewPrefixedEventSource("appletv", eventSink)
 	atv := &AppleTV{
 		cfg: cfg,
 		eventSink: sink,
@@ -198,15 +203,15 @@ func NewAppleTV(cfg *Config, eventSink events.EventSink) (*AppleTV, error) {
 
 func (atv *AppleTV) registerEventTypes() {
 	now := time.Now().In(time.Local)
-	atv.eventSink.RegisterEventType("power", &AppleTVStatus{
+	atv.eventSink.RegisterEventType(events.NewEvent("power", &AppleTVStatus{
 		PowerState: stringp("on"),
 		LastUpdate: now,
-	})
-	atv.eventSink.RegisterEventType("connection", &AppleTVStatus{
+	}))
+	atv.eventSink.RegisterEventType(events.NewEvent("connection", &AppleTVStatus{
 		Connection: stringp("open"),
 		LastUpdate: now,
-	})
-	atv.eventSink.RegisterEventType("content", &AppleTVStatus{
+	}))
+	atv.eventSink.RegisterEventType(events.NewEvent("content", &AppleTVStatus{
 		Result: "success",
 		MediaType: "video",
 		DeviceState: "playing",
@@ -215,14 +220,14 @@ func (atv *AppleTV) registerEventTypes() {
 		Position: intp(0),
 		App: stringp("Netflix"),
 		LastUpdate: now,
-	})
-	atv.eventSink.RegisterEventType("idle", &AppleTVStatus{
+	}))
+	atv.eventSink.RegisterEventType(events.NewEvent("idle", &AppleTVStatus{
 		Result: "success",
 		MediaType: "unknown",
 		DeviceState: "idle",
 		LastUpdate: now,
-	})
-	atv.eventSink.RegisterEventType("playing", &AppleTVStatus{
+	}))
+	atv.eventSink.RegisterEventType(events.NewEvent("playing", &AppleTVStatus{
 		Result: "success",
 		MediaType: "video",
 		DeviceState: "playing",
@@ -231,8 +236,8 @@ func (atv *AppleTV) registerEventTypes() {
 		Position: intp(1482),
 		App: stringp("Netflix"),
 		LastUpdate: now,
-	})
-	atv.eventSink.RegisterEventType("paused", &AppleTVStatus{
+	}))
+	atv.eventSink.RegisterEventType(events.NewEvent("paused", &AppleTVStatus{
 		Result: "success",
 		MediaType: "video",
 		DeviceState: "paused",
@@ -241,7 +246,7 @@ func (atv *AppleTV) registerEventTypes() {
 		Position: intp(1482),
 		App: stringp("Netflix"),
 		LastUpdate: now,
-	})
+	}))
 }
 
 func (atv *AppleTV) updateState(update *AppleTVStatus) {
@@ -251,9 +256,9 @@ func (atv *AppleTV) updateState(update *AppleTVStatus) {
 	if update.PowerState != nil {
 		state.PowerState = update.PowerState
 		if update.DeviceState == "" {
-			state.PowerState = "idle"
+			state.PowerState = stringp("idle")
 		} else {
-			state.PowerState = update.DeviceState
+			state.PowerState = update.PowerState
 		}
 		atv.state = state
 		atv.eventSink.Emit("power", update)
@@ -265,7 +270,7 @@ func (atv *AppleTV) updateState(update *AppleTVStatus) {
 		if state.Connection == nil || *state.Connection != "open" {
 			state.Connection = stringp("open")
 			atv.state = state
-			atv.eventSink.Emit("connection", &AppleTVState{
+			atv.eventSink.Emit("connection", &AppleTVStatus{
 				Connection: state.Connection,
 				LastUpdate: state.LastUpdate,
 			})
@@ -344,35 +349,10 @@ func (atv *AppleTV) Monitor(interval time.Duration) func() {
 }
 
 func (atv *AppleTV) HandleRead(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	_, data, err := atv.Check()
-	return data, err
+	return atv.Check()
 }
 
-func (atv *AppleTV) HandleListWebhooks(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	return atv.webhooks.webhooks, nil
-}
-
-func (atv *AppleTV) HandleAddWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	webhook := &ThresholdWebhook{}
-	err := httpserver.ReadJSON(r, webhook)
-	if err != nil {
-		return nil, err
-	}
-	atv.webhooks.RegisterWebhook(webhook)
-	return atv.webhooks.List(), nil
-}
-
-func (atv *AppleTV) HandleRemoveWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	webhook := &ThresholdWebhook{}
-	err := httpserver.ReadJSON(r, webhook)
-	if err != nil {
-		return nil, err
-	}
-	atv.webhooks.UnregisterWebhook(webhook)
-	return atv.webhooks.List(), nil
-}
-
-func (atv *AppleTV) Connect() (updates chan *AppleTVStatus, reconnect func(), disconnect func()){
+func (atv *AppleTV) Connect() (updates chan *AppleTVStatus, reconnect func(), disconnect func()) {
 	quitch := make(chan bool, 1)
 	quit := false
 	disconnect = func() {
@@ -385,7 +365,7 @@ func (atv *AppleTV) Connect() (updates chan *AppleTVStatus, reconnect func(), di
 	reconnect = func() {
 		reconch <- true
 	}
-	updates := make(chan *AppleTVStatus, 20)
+	updates = make(chan *AppleTVStatus, 20)
 	go func() {
 		kill, died := atv.connectOnce(updates)
 		for {
@@ -396,71 +376,71 @@ func (atv *AppleTV) Connect() (updates chan *AppleTVStatus, reconnect func(), di
 				return
 			case <-reconch:
 				kill()
-				kill, died = atv.connect(updates)
+				kill, died = atv.connectOnce(updates)
 			case err := <-died:
 				if err != nil {
 					time.Sleep(10 * time.Second)
 				}
-				kill, died = atv.connect(updates)
+				kill, died = atv.connectOnce(updates)
 			}
 		}
 	}()
-		if err != nil {
-			log.Println("error running appletv connection:", err)
-			time.Sleep(10 * time.Second)
-		}
-	}
+	return
 }
 
 func (atv *AppleTV) connectOnce(updates chan *AppleTVStatus) (kill func(), died chan error) {
-	cmdIn := atv.cmdIn
-	atv.cmdIn = nil
-	if cmdIn != nil {
-		cmdIn.Write([]byte{'\n'})
-		cmdIn.Close()
-	}
+	kill = func() {}
+	died = make(chan error, 1)
 	cmd := exec.Command("atvscript", "--id", atv.cfg.AppleTV.ID, "--airplay-credentials", atv.cfg.AppleTV.Airplay, "push_updates")
 	cmdIn, err := cmd.StdinPipe()
 	if err != nil {
-		return err
+		died <- err
+		return kill, died
 	}
 	cmdOut, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		died <- err
+		return kill, died
 	}
 	log.Println(strings.Join(cmd.Args, " "))
 	err = cmd.Start()
 	if err != nil {
-		return err
+		died <- err
+		return kill, died
 	}
+	killed := false
 	kill = func() {
-		cmdIn.Write([]byte{'\n'})
-		cmdIn.Close()
-		p := cmd.Process
-		if p != nil {
-			p.Kill()
+		if !killed {
+			killed = true
+			cmdIn.Write([]byte{'\n'})
+			cmdIn.Close()
+			p := cmd.Process
+			if p != nil {
+				p.Kill()
+			}
 		}
 	}
-	died = make(chan error, 1)
+	go func() {
+		err := cmd.Wait()
+		if err != nil {
+			died <- err
+		}
+		close(died)
+	}()
 	go func() {
 		bufOut := bufio.NewReader(cmdOut)
 		for {
 			line, err := bufOut.ReadString('\n')
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					p := cmd.Process
-					if p != nil {
-						p.Wait()
-					}
-					close(died)
 					return
 				}
 				log.Println("error reading from command:", err)
+				died <- err
 				p := cmd.Process
 				if p != nil {
 					p.Kill()
 				}
-				died <- err
 				return
 			}
 			log.Println("appletv:", string(line))

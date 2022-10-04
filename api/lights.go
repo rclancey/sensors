@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rclancey/events"
 	"github.com/rclancey/httpserver/v2"
 	"github.com/rclancey/kasa"
 
@@ -29,12 +30,11 @@ type LightStatus struct {
 }
 
 func NewLightStatus(cfg *Config, eventSink events.EventSink) (*LightStatus, error) {
-	sink := events.NewPrefixedEventSink("lights", eventSink)
+	sink := events.NewPrefixedEventSource("lights", eventSink)
 	ls := &LightStatus{
 		cfg: cfg,
 		eventSink: sink,
 		devices: map[string]*device{},
-		webhooks: webhooks,
 		lock: &sync.Mutex{},
 	}
 	ls.registerEventTypes()
@@ -42,16 +42,16 @@ func NewLightStatus(cfg *Config, eventSink events.EventSink) (*LightStatus, erro
 }
 
 func (ls *LightStatus) registerEventTypes() {
-	ls.eventSink.RegisterEventType("add", &device{})
-	ls.eventSink.RegisterEventType("on", &device{})
-	ls.eventSink.RegisterEventType("off", &device{})
-	ls.eventSink.RegisterEventType("lost", &device{})
+	ls.eventSink.RegisterEventType(events.NewEvent("add", &device{}))
+	ls.eventSink.RegisterEventType(events.NewEvent("on", &device{}))
+	ls.eventSink.RegisterEventType(events.NewEvent("off", &device{}))
+	ls.eventSink.RegisterEventType(events.NewEvent("lost", &device{}))
 }
 
 func (ls *LightStatus) update(dev kasa.SmartDevice) {
 	xdev := &device{dev, 0, time.Now()}
 	if dev.IsOn() {
-		bulb, ok := dev.SmartDevice.(*kasa.SmartBulb)
+		bulb, ok := dev.(*kasa.SmartBulb)
 		if ok {
 			xdev.State = bulb.GetLightState().Brightness
 		} else {

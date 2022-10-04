@@ -25,11 +25,17 @@ require (
 	github.com/mdlayher/packet v1.0.0 // indirect
 	github.com/mdlayher/socket v0.2.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/rclancey/apiclient v0.0.3 // indirect
 	github.com/rclancey/archer-ax50 v0.0.1 // indirect
 	github.com/rclancey/argparse v1.0.1 // indirect
-	github.com/rclancey/generic v0.0.1 // indirect
+	github.com/rclancey/cache v0.0.4 // indirect
+	github.com/rclancey/encoding-form v0.0.1 // indirect
+	github.com/rclancey/events v0.0.1 // indirect
+	github.com/rclancey/fsutil v0.0.0-20200904003901-a5ae5b676fef // indirect
+	github.com/rclancey/generic v0.0.2 // indirect
 	github.com/rclancey/go-sonos v0.0.2 // indirect
 	github.com/rclancey/logrotate v1.0.1 // indirect
+	github.com/rclancey/openweathermap v0.0.0-20211206225620-59d3628db197 // indirect
 	golang.org/x/net v0.0.0-20220927171203-f486391704dc // indirect
 	golang.org/x/sync v0.0.0-20220923202941-7f9b1623fab7 // indirect
 	golang.org/x/sys v0.0.0-20220919091848-fb04ddd9f9c8 // indirect

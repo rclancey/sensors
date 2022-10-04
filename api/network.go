@@ -7,7 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rclancey/httpserver/v2"
+	"github.com/rclancey/events"
+	//"github.com/rclancey/httpserver/v2"
 	"github.com/rclancey/archer-ax50"
 )
 
@@ -31,8 +32,8 @@ type NetworkStatus struct {
 	hosts map[string]*HostInfo `json:"hosts"`
 	active int `json:"active"`
 	cfg *Config
+	eventSink events.EventSink
 	mutex *sync.Mutex
-	webhooks *ThresholdWebhookList
 }
 
 func NewNetworkStatus(cfg *Config, eventSink events.EventSink) (*NetworkStatus, error) {
@@ -42,7 +43,6 @@ func NewNetworkStatus(cfg *Config, eventSink events.EventSink) (*NetworkStatus, 
 		cfg: cfg,
 		eventSink: events.NewPrefixedEventSource("network", eventSink),
 		mutex: &sync.Mutex{},
-		webhooks: webhooks,
 	}
 	ns.registerEventTypes()
 	return ns, nil
@@ -50,30 +50,30 @@ func NewNetworkStatus(cfg *Config, eventSink events.EventSink) (*NetworkStatus, 
 
 func (ns *NetworkStatus) registerEventTypes() {
 	now := time.Now()
-	ns.eventSink.RegisterEventType("add", &HostInfo{
+	ns.eventSink.RegisterEventType(events.NewEvent("add", &HostInfo{
 		MAC: "40:3f:8c:72:bd:a4",
 		IPv4: "129.168.0.100",
 		Hostname: "laptop",
 		Connection: "2.4G",
 		LastSeen: now,
 		Active: true,
-	})
-	ns.eventSink.RegisterEventType("drop", &HostInfo{
+	}))
+	ns.eventSink.RegisterEventType(events.NewEvent("drop", &HostInfo{
 		MAC: "40:3f:8c:72:bd:a4",
 		IPv4: "129.168.0.100",
 		Hostname: "laptop",
 		Connection: "2.4G",
 		LastSeen: now.Add(-5 * time.Minute),
 		Active: false,
-	})
-	ns.eventSink.RegisterEventType("change", &HostInfo{
+	}))
+	ns.eventSink.RegisterEventType(events.NewEvent("change", &HostInfo{
 		MAC: "40:3f:8c:72:bd:a4",
 		IPv4: "129.168.0.101",
 		Hostname: "laptop",
 		Connection: "2.4G",
 		LastSeen: now,
 		Active: true,
-	})
+	}))
 }
 
 func (ns *NetworkStatus) Check() (interface{}, error) {

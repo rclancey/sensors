@@ -19,10 +19,11 @@ import (
 	//"sync"
 	"time"
 
+	"github.com/rclancey/events"
 	"github.com/rclancey/go-sonos"
 	"github.com/rclancey/go-sonos/ssdp"
 	"github.com/rclancey/go-sonos/upnp"
-	"github.com/rclancey/httpserver/v2"
+	//"github.com/rclancey/httpserver/v2"
 	//"github.com/rclancey/synos/musicdb"
 )
 
@@ -33,7 +34,7 @@ const (
 
 type Sonos struct {
 	cfg *Config
-	webhooks *ThresholdWebhookList
+	eventSink events.EventSink
 	mgrPort int
 	reactorPort int
 	dev ssdp.Device
@@ -42,18 +43,10 @@ type Sonos struct {
 	state *SonosState
 }
 
-func NewSonos(cfg *Config) (*Sonos, error) {
-	fn, err := cfg.Abs("motion-sensor-webhooks.json")
-	if err != nil {
-		return nil, err
-	}
-	webhooks, err := NewThresholdWebhookList(fn)
-	if err != nil {
-		return nil, err
-	}
+func NewSonos(cfg *Config, eventSink events.EventSink) (*Sonos, error) {
 	s := &Sonos{
 		cfg: cfg,
-		webhooks: webhooks,
+		eventSink: events.NewPrefixedEventSource("sonos", eventSink),
 	}
 	iface := cfg.Network.GetInterface()
 	var ok bool
@@ -65,9 +58,7 @@ func NewSonos(cfg *Config) (*Sonos, error) {
 	if !ok {
 		return nil, errors.New("no free port")
 	}
-	if err != nil {
-		return nil, err
-	}
+	var err error
 	s.dev, err = s.getDevice()
 	if err != nil {
 		return nil, err
@@ -80,6 +71,7 @@ func NewSonos(cfg *Config) (*Sonos, error) {
 			if !ok {
 				break
 			}
+			s.eventSink.Emit("reactor", msg)
 			msgj, err := json.Marshal(msg)
 			if err != nil {
 				log.Println("sonos event", msg)
@@ -92,48 +84,82 @@ func NewSonos(cfg *Config) (*Sonos, error) {
 	return s, nil
 }
 
-func (s *Sonos) Check() (float64, interface{}, error) {
-	state, err := s.GetState()
-	if err != nil {
-		return -1, nil, err
+func playStateChanged(prev, cur *SonosState) (string, float64, bool) {
+	if cur == nil || cur.State == nil {
+		return "", 0, false
 	}
-	s.state = state
-	if state.State != nil && state.Index != nil && *state.State == "PLAYING" {
-		return float64(*state.Index), state, nil
+	if prev == nil || prev.State == nil || *prev.State != *cur.State {
+		switch *cur.State {
+		case "PLAYING":
+			return "play", 1, true
+		case "PAUSED":
+			return "pause", 0, true
+		default:
+			return "state", -1, true
+		}
 	}
-	return -1, state, nil
+	return "", 0, false
 }
 
-func (s *Sonos) Monitor(interval time.Duration) {
-	go s.webhooks.Monitor(s, interval)
+func playContentChanged(prev, cur *SonosState) (string, bool) {
+	if cur == nil || cur.Index == nil || *cur.Index < 0 || *cur.Index >= len(cur.Tracks) {
+		return "", false
+	}
+	curTrack := cur.Tracks[*cur.Index]
+	if curTrack == nil {
+		return "", false
+	}
+	if prev == nil || prev.Index == nil || *prev.Index < 0 || *prev.Index >= len(prev.Tracks) {
+		return "content", true
+	}
+	prevTrack := prev.Tracks[*prev.Index]
+	if prevTrack == nil {
+		return "content", true
+	}
+	if curTrack.URI != prevTrack.URI {
+		return "content", true
+	}
+	return "", false
+}
+
+func volumeChanged(prev, cur *SonosState) (string, float64, bool) {
+	if cur == nil || cur.Volume == nil {
+		return "", 0, false
+	}
+	if prev == nil || prev.Volume == nil || *prev.Volume != *cur.Volume {
+		return "volume", float64(*cur.Volume), true
+	}
+	return "", 0, false
+}
+
+func (s *Sonos) Check() (interface{}, error) {
+	state, err := s.GetState()
+	if err != nil {
+		return nil, err
+	}
+	prev := s.state
+	s.state = state
+	evt, val, ok := playStateChanged(prev, state)
+	if ok {
+		s.eventSink.Emit(evt, &SonosStateWithValue{state, val})
+	}
+	evt, val, ok = volumeChanged(prev, state)
+	if ok {
+		s.eventSink.Emit(evt, &SonosStateWithValue{state, val})
+	}
+	evt, ok = playContentChanged(prev, state)
+	if ok {
+		s.eventSink.Emit(evt, state)
+	}
+	return state, nil
+}
+
+func (s *Sonos) Monitor(interval time.Duration) func() {
+	return Monitor(s, interval)
 }
 
 func (s *Sonos) HandleRead(w http.ResponseWriter, r *http.Request) (interface{}, error) {
 	return s.state, nil
-}
-
-func (s *Sonos) HandleListWebhooks(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	return s.webhooks.webhooks, nil
-}
-
-func (s *Sonos) HandleAddWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	webhook := &ThresholdWebhook{}
-	err := httpserver.ReadJSON(r, webhook)
-	if err != nil {
-		return nil, err
-	}
-	s.webhooks.RegisterWebhook(webhook)
-	return s.webhooks.List(), nil
-}
-
-func (s *Sonos) HandleRemoveWebhook(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	webhook := &ThresholdWebhook{}
-	err := httpserver.ReadJSON(r, webhook)
-	if err != nil {
-		return nil, err
-	}
-	s.webhooks.UnregisterWebhook(webhook)
-	return s.webhooks.List(), nil
 }
 
 func (s *Sonos) Shutdown() error {
@@ -464,6 +490,24 @@ type SonosState struct {
 	PlayMode *int `json:"mode,omitempty"`
 	Error error `json:"error,omitempty"`
 	LastUpdate time.Time `json:"now"`
+}
+
+type SonosStateWithValue struct {
+	*SonosState
+	value float64
+}
+
+func (s *SonosStateWithValue) GetValue() float64 {
+	return s.value
+}
+
+type SonosStateWithMessage struct {
+	*SonosState
+	message string
+}
+
+func (s *SonosStateWithMessage) GetMessage() string {
+	return s.message
 }
 
 var refTime = time.Date(0, time.January, 1, 0, 0, 0, 0, time.UTC)

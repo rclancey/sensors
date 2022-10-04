@@ -8,8 +8,9 @@ import (
 	//"path/filepath"
 	"time"
 
-	"github.com/rclancey/generic"
-	"github.com/rclancey/httpserver/v2"
+	"github.com/rclancey/events"
+	//"github.com/rclancey/generic"
+	//"github.com/rclancey/httpserver/v2"
 	"github.com/warthog618/gpiod"
 	"github.com/warthog618/gpiod/device/rpi"
 )
@@ -26,7 +27,7 @@ type MotionSensor struct {
 	eventSink events.EventSink
 	line *gpiod.Line
 	lastMotion time.Time
-	lastStillness time.Time
+	lastStillness time.Duration
 }
 
 func NewMotionSensor(cfg *Config, eventSink events.EventSink) (*MotionSensor, error) {
@@ -48,16 +49,16 @@ func NewMotionSensor(cfg *Config, eventSink events.EventSink) (*MotionSensor, er
 
 func (ms *MotionSensor) registerEventTypes() {
 	now := time.Now()
-	ms.eventSink.RegisterEventType("movement", &MotionSensorStatus{
+	ms.eventSink.RegisterEventType(events.NewEvent("movement", &MotionSensorStatus{
 		Now: now,
 		LastMotion: now,
 		ElapsedTime: 0,
-	})
-	ms.eventSink.RegisterEventType("stillness", &MotionSensorStatus{
+	}))
+	ms.eventSink.RegisterEventType(events.NewEvent("stillness", &MotionSensorStatus{
 		Now: now,
 		LastMotion: now.Add(-5 * time.Minute),
-		Elapsed: 300,
-	})
+		ElapsedTime: 300,
+	}))
 }
 
 func (ms *MotionSensor) Check() (interface{}, error) {
@@ -108,6 +109,5 @@ func (ms *MotionSensor) Monitor(interval time.Duration) func() {
 }
 
 func (ms *MotionSensor) HandleRead(w http.ResponseWriter, r *http.Request) (interface{}, error) {
-	_, data, err := ms.Check()
-	return data, err
+	return ms.Check()
 }

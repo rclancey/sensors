@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rclancey/events"
 	H "github.com/rclancey/httpserver/v2"
 	"github.com/rclancey/logging"
 )
@@ -97,41 +98,54 @@ func startup() (*logging.Logger, *H.Server, error) {
 		log.Fatalln("can't create server:", err)
 	}
 
-	bs, err := NewBrightnessSensor(cfg.ServerConfig)
+	eventSink := events.NewEventSink(24 * time.Hour)
+
+	bs, err := NewBrightnessSensor(cfg, eventSink)
 	if err != nil {
 		log.Fatalln("can't create brightness sensor:", err)
 	}
 	bs.Monitor(time.Minute)
 
-	ms, err := NewMotionSensor(cfg.ServerConfig)
+	ms, err := NewMotionSensor(cfg, eventSink)
 	if err != nil {
 		log.Fatalln("can't create motion sensor:", err)
 	}
 	ms.Monitor(500 * time.Millisecond)
 
-	ls, err := NewLightStatus(cfg.ServerConfig)
+	ls, err := NewLightStatus(cfg, eventSink)
 	if err != nil {
 		log.Fatalln("can't create light status:", err)
 	}
 	ls.Monitor(time.Minute)
 
-	atv, err := NewAppleTV(cfg)
+	atv, err := NewAppleTV(cfg, eventSink)
 	if err != nil {
 		log.Fatalln("can't create appletv:", err)
 	}
 	atv.Monitor(time.Second)
 
-	sonos, err := NewSonos(cfg)
+	sonos, err := NewSonos(cfg, eventSink)
 	if err != nil {
 		log.Fatalln("can't create sonos:", err)
 	}
 	sonos.Monitor(5 * time.Second)
 
-	ns, err := NewNetworkStatus(cfg)
+	ns, err := NewNetworkStatus(cfg, eventSink)
 	if err != nil {
 		log.Fatalln("can't create network:", err)
 	}
 	ns.Monitor(5 * time.Minute)
+
+	weather, err := NewWeather(cfg, eventSink)
+	if err != nil {
+		log.Fatalln("can't create weather station:", err)
+	}
+	weather.Monitor(15 * time.Minute)
+
+	whl, err := NewWebhookList(cfg, eventSink)
+	if err != nil {
+		log.Fatalln("can't create webhook list:", err)
+	}
 
 	go func() {
 		log.Println("running initial checks...")
@@ -147,12 +161,14 @@ func startup() (*logging.Logger, *H.Server, error) {
 		log.Println("appletv")
 		ns.Check()
 		log.Println("network")
+		weather.Check()
+		log.Println("weather")
 	}()
 
 	srv.RegisterOnShutdown(func() {
 		log.Println("cleanup globals on shutdown")
-		bs.webhooks.Stop()
-		ms.webhooks.Stop()
+		//bs.webhooks.Stop()
+		//ms.webhooks.Stop()
 	})
 
 	/*
@@ -163,30 +179,11 @@ func startup() (*logging.Logger, *H.Server, error) {
 	*/
 	errlog.Infoln("server starting...")
 	srv.GET("/brightness/status", H.HandlerFunc(bs.HandleRead))
-	srv.GET("/brightness/webhook", H.HandlerFunc(bs.HandleListWebhooks))
-	srv.POST("/brightness/webhook", H.HandlerFunc(bs.HandleAddWebhook))
-	srv.DELETE("/brightness/webhook", H.HandlerFunc(bs.HandleRemoveWebhook))
-
 	srv.GET("/motion/status", H.HandlerFunc(ms.HandleRead))
-	srv.GET("/motion/webhook", H.HandlerFunc(ms.HandleListWebhooks))
-	srv.POST("/motion/webhook", H.HandlerFunc(ms.HandleAddWebhook))
-	srv.DELETE("/motion/webhook", H.HandlerFunc(ms.HandleRemoveWebhook))
-
 	srv.GET("/lights/status", H.HandlerFunc(ls.HandleRead))
-	srv.GET("/lights/webhook", H.HandlerFunc(ls.HandleListWebhooks))
-	srv.POST("/lights/webhook", H.HandlerFunc(ls.HandleAddWebhook))
-	srv.DELETE("/lights/webhook", H.HandlerFunc(ls.HandleRemoveWebhook))
-	srv.PUT("/lights/", H.HandlerFunc(ls.HandlePut))
-
 	srv.GET("/sonos/status", H.HandlerFunc(sonos.HandleRead))
-	srv.GET("/sonos/swebhook", H.HandlerFunc(sonos.HandleListWebhooks))
-	srv.POST("/sonos/webhook", H.HandlerFunc(sonos.HandleAddWebhook))
-	srv.DELETE("/sonos/webhook", H.HandlerFunc(sonos.HandleRemoveWebhook))
-
 	srv.GET("/network/status", H.HandlerFunc(ns.HandleRead))
-	srv.GET("/network/swebhook", H.HandlerFunc(ns.HandleListWebhooks))
-	srv.POST("/network/webhook", H.HandlerFunc(ns.HandleAddWebhook))
-	srv.DELETE("/network/webhook", H.HandlerFunc(ns.HandleRemoveWebhook))
+	srv.GET("/weather/status", H.HandlerFunc(weather.HandleRead))
 
 	srv.GET("/status", indexFunc(map[string]sensor{
 		"brightness": bs,
@@ -195,7 +192,19 @@ func startup() (*logging.Logger, *H.Server, error) {
 		"appletv": atv,
 		"sonos": sonos,
 		"network": ns,
+		"weather": weather,
 	}))
+
+	srv.PUT("/lights/", H.HandlerFunc(ls.HandlePut))
+	//srv.PUT("/sonos/volume", H.HandlerFunc(sonos.HandleSetVolume))
+	//srv.POST("/sonos/playliist", H.HandlerFunc(sonos.HandleSetPlaylist))
+	//srv.PUT("/sonos/playback", H.HandlerFunc(sonos.SetPlayback))
+
+	srv.GET("/events", H.HandlerFunc(whl.HandleListEventTypes))
+	srv.GET("/webhooks", H.HandlerFunc(whl.HandleListWebhooks))
+	srv.POST("/webhooks", H.HandlerFunc(whl.HandleAddWebhook))
+	srv.DELETE("/webhooks", H.HandlerFunc(whl.HandleRemoveWebhook))
+
 	//srv.GET("/", http.FileServer(http.FS(uifs)))
 	errlog.Infoln("server ready")
 
