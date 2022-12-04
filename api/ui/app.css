@@ -1,7 +1,23 @@
+@media (max-width: 800px) {
+  body, div {
+    font-size: 24px;
+  }
+}
+
+@media (min-width: 801px) {
+  body, div {
+    font-size: small;
+  }
+}
+
 body, div {
-  font-size: small;
   color: white;
   background-color: black;
+}
+
+input[type="checkbox"] {
+  width: 0.75em;
+  height: 0.75em;
 }
 
 div.status {
@@ -11,6 +27,8 @@ div.status {
 
 div.status>div {
   padding: 2em;
+  min-width: 300px;
+  max-width: calc(100vw - 4em);
 }
 
 div.header {

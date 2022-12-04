@@ -93,11 +93,11 @@ const Brightness = ({ light }) => (
       <div className="key">Visible:</div>
       <div className="nval">${light.visible}</div>
       <div className="key">Infrared:</div>
-      <div className="vnal">${light.infrared}</div>
+      <div className="nval">${light.infrared}</div>
       <div className="key">Full Spectrum:</div>
-      <div className="vnal">${light.full_spectrum}</div>
+      <div className="nval">${light.full_spectrum}</div>
       <div className="key">Lux:</div>
-      <div className="vnal">${light.lux}</div>
+      <div className="nval">${light.lux}</div>
     </div>
     <${AsOf} now=${light.now} />
   </div>`
