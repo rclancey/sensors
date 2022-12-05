@@ -3,6 +3,7 @@ package api
 import (
 	//"bytes"
 	//"encoding/json"
+	"log"
 	"net/http"
 	//"os/exec"
 	//"path/filepath"
@@ -43,6 +44,8 @@ func NewWeather(cfg *Config, eventSink events.EventSink) (*Weather, error) {
 		cfg: cfg,
 		client: client,
 		eventSink: events.NewPrefixedEventSource("weather", eventSink),
+		lat: cfg.Location.Latitude,
+		lon: cfg.Location.Longitude,
 		lock: &sync.Mutex{},
 	}
 	weather.registerEventTypes()
@@ -50,8 +53,13 @@ func NewWeather(cfg *Config, eventSink events.EventSink) (*Weather, error) {
 }
 
 func (w *Weather) registerEventTypes() {
+	forecast, err := w.client.Forecast(w.lat, w.lon)
+	if err != nil {
+		log.Println("error getting forecast:", err)
+		return
+	}
+	w.lastReading = forecast
 	w.eventSink.RegisterEventType(events.NewEvent("location", map[string]float64{"lat": w.lat, "lon": w.lon}))
-	forecast := w.lastReading
 	w.eventSink.RegisterEventType(events.NewEvent("forecast", forecast))
 	w.eventSink.RegisterEventType(events.NewEvent("pressure", &ValueWithUnits{"pressure", forecast.Current.PressureHPa, "hPa"}))
 	w.eventSink.RegisterEventType(events.NewEvent("humidity", &ValueWithUnits{"humidity", forecast.Current.HumidityPct, "%"}))
@@ -91,13 +99,16 @@ func (v *ValueWithUnits) GetValue() float64 {
 
 func (w *Weather) Check() (interface{}, error) {
 	if w.lat == 0 && w.lon == 0 {
+		log.Println("no location for weather")
 		return nil, nil
 	}
 	forecast, err := w.client.Forecast(w.lat, w.lon)
 	if err != nil {
+		log.Println("error getting forecast:", err)
 		return nil, err
 	}
 	if forecast == nil {
+		log.Println("no forecast!")
 		return nil, nil
 	}
 	prev := w.lastReading

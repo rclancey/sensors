@@ -12,19 +12,14 @@ import (
 	"github.com/rclancey/events"
 	"github.com/rclancey/httpserver/v2"
 	"github.com/rclancey/kasa"
+	"github.com/rclancey/sensors/types"
 
 )
-
-type device struct {
-	kasa.SmartDevice
-	State int
-	LastUpdate time.Time
-}
 
 type LightStatus struct {
 	cfg *Config
 	eventSink events.EventSink
-	devices map[string]*device
+	devices map[string]*types.Device
 	lock *sync.Mutex
 	lastUpdate time.Time
 }
@@ -34,7 +29,7 @@ func NewLightStatus(cfg *Config, eventSink events.EventSink) (*LightStatus, erro
 	ls := &LightStatus{
 		cfg: cfg,
 		eventSink: sink,
-		devices: map[string]*device{},
+		devices: map[string]*types.Device{},
 		lock: &sync.Mutex{},
 	}
 	ls.registerEventTypes()
@@ -42,14 +37,14 @@ func NewLightStatus(cfg *Config, eventSink events.EventSink) (*LightStatus, erro
 }
 
 func (ls *LightStatus) registerEventTypes() {
-	ls.eventSink.RegisterEventType(events.NewEvent("add", &device{}))
-	ls.eventSink.RegisterEventType(events.NewEvent("on", &device{}))
-	ls.eventSink.RegisterEventType(events.NewEvent("off", &device{}))
-	ls.eventSink.RegisterEventType(events.NewEvent("lost", &device{}))
+	ls.eventSink.RegisterEventType(events.NewEvent("add", &types.Device{}))
+	ls.eventSink.RegisterEventType(events.NewEvent("on", &types.Device{}))
+	ls.eventSink.RegisterEventType(events.NewEvent("off", &types.Device{}))
+	ls.eventSink.RegisterEventType(events.NewEvent("lost", &types.Device{}))
 }
 
 func (ls *LightStatus) update(dev kasa.SmartDevice) {
-	xdev := &device{dev, 0, time.Now()}
+	xdev := &types.Device{dev, 0, time.Now()}
 	if dev.IsOn() {
 		bulb, ok := dev.(*kasa.SmartBulb)
 		if ok {

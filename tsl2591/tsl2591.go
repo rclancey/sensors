@@ -6,6 +6,7 @@ reads waveshare ambient light sensor TSL2591
 import (
 	"errors"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/d2r2/go-i2c"
@@ -96,10 +97,11 @@ type TSL2591 struct {
 	id byte
 	gain int
 	integralTime int
+	mutex *sync.Mutex
 }
 
 func New() (*TSL2591, error) {
-	self := &TSL2591{}
+	self := &TSL2591{mutex: &sync.Mutex{}}
 	self.address = ADDR
 	var err error
 	self.i2c, err = i2c.NewI2C(self.address, 1)
@@ -130,6 +132,7 @@ func New() (*TSL2591, error) {
 	}
 
 	err = self.Enable()
+	defer self.Disable()
 	if err != nil {
 		return nil, err
 	}
@@ -142,10 +145,6 @@ func New() (*TSL2591, error) {
 		return nil, err
 	}
 	err = self.WriteByte(PERSIST_REGISTER, 0x01)
-	if err != nil {
-		return nil, err
-	}
-	err = self.Disable()
 	if err != nil {
 		return nil, err
 	}
@@ -169,10 +168,12 @@ func (self *TSL2591) WriteByte(addr, val byte) error {
 }
 
 func (self *TSL2591) Enable() error {
+	self.mutex.Lock()
 	return self.WriteByte(ENABLE_REGISTER, ENABLE_AIEN | ENABLE_POWERON | ENABLE_AEN | ENABLE_NPIEN)
 }
 
 func (self *TSL2591) Disable() error {
+	defer self.mutex.Unlock()
 	return self.WriteByte(ENABLE_REGISTER, ENABLE_POWEROFF)
 }
 
@@ -239,10 +240,10 @@ func (self *TSL2591) ReadCHAN1() (int, error) {
 
 func (self *TSL2591) ReadFullSpectrum() (int, error) {
 	err := self.Enable()
+	defer self.Disable()
 	if err != nil {
 		return 0, err
 	}
-	defer self.Disable()
 	ch0, err := self.ReadCHAN0()
 	if err != nil {
 		return 0, err
@@ -256,19 +257,19 @@ func (self *TSL2591) ReadFullSpectrum() (int, error) {
 
 func (self *TSL2591) ReadInfrared() (int, error) {
 	err := self.Enable()
+	defer self.Disable()
 	if err != nil {
 		return 0, err
 	}
-	defer self.Disable()
 	return self.ReadCHAN0()
 }
 
 func (self *TSL2591) ReadVisible() (int, error) {
 	err := self.Enable()
+	defer self.Disable()
 	if err != nil {
 		return 0, err
 	}
-	defer self.Disable()
 	ch1, err := self.ReadCHAN1()
 	if err != nil {
 		return 0, err
@@ -285,6 +286,7 @@ var ErrNumericalOverflow = errors.New("Numerical overflow")
 func (self *TSL2591) Lux() (int, error) {
 	err := self.Enable()
 	if err != nil {
+		self.Disable()
 		return 0, err
 	}
 	n := self.integralTime + 2
@@ -308,6 +310,7 @@ func (self *TSL2591) Lux() (int, error) {
 
 	err = self.Enable()
 	if err != nil {
+		self.Disable()
 		return 0, err
 	}
 	err = self.WriteByte(0xe7, 0x13) // Clear interrupt flag
@@ -384,10 +387,10 @@ func (self *TSL2591) Lux() (int, error) {
 
 func (self *TSL2591) SetInterrupThreshold(high, low int) error {
 	err := self.Enable()
+	defer self.Disable()
 	if err != nil {
 		return err
 	}
-	defer self.Disable()
 	err = self.WriteByte(AILTL_REGISTER, byte(low & 0xff))
 	if err != nil {
 		return err
@@ -444,10 +447,10 @@ func (self *TSL2591) SetLuxInterrupt(setLow, setHigh int) error {
 	setHigh = int(cpl * float64(setHigh)) + 2 * ch1 - 1
 	setLow = int(cpl * float64(setLow)) + 2 * ch1 + 1
 	err = self.Enable()
+	defer self.Disable()
 	if err != nil {
 		return err
 	}
-	defer self.Disable()
 	err = self.WriteByte(AILTL_REGISTER, byte(setLow & 0xff))
 	if err != nil {
 		return err

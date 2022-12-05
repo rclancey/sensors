@@ -12,6 +12,12 @@ require (
 )
 
 require (
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/stretchr/testify v1.8.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
+
+require (
 	github.com/Ullaakut/nmap/v2 v2.2.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-ping/ping v1.1.0 // indirect
@@ -25,12 +31,12 @@ require (
 	github.com/mdlayher/packet v1.0.0 // indirect
 	github.com/mdlayher/socket v0.2.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/rclancey/apiclient v0.0.3 // indirect
+	github.com/rclancey/apiclient v0.0.4
 	github.com/rclancey/archer-ax50 v0.0.1 // indirect
 	github.com/rclancey/argparse v1.0.1 // indirect
 	github.com/rclancey/cache v0.0.4 // indirect
 	github.com/rclancey/encoding-form v0.0.1 // indirect
-	github.com/rclancey/events v0.0.1 // indirect
+	github.com/rclancey/events v0.0.3 // indirect
 	github.com/rclancey/fsutil v0.0.0-20200904003901-a5ae5b676fef // indirect
 	github.com/rclancey/generic v0.0.2 // indirect
 	github.com/rclancey/go-sonos v0.0.2 // indirect

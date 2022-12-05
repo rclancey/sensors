@@ -12,16 +12,8 @@ import (
 	"github.com/rclancey/events"
 	//"github.com/rclancey/httpserver/v2"
 	"github.com/rclancey/sensors/tsl2591"
+	"github.com/rclancey/sensors/types"
 )
-
-type BrightnessReading struct {
-	*tsl2591.SensorData
-	Now time.Time `json:"now"`
-}
-
-func (br *BrightnessReading) Value() float64 {
-	return float64(br.Lux)
-}
 
 type BrightnessSensor struct {
 	cfg *Config
@@ -29,7 +21,7 @@ type BrightnessSensor struct {
 	eventSink events.EventSink
 	stop chan bool
 	lock *sync.Mutex
-	lastReading *BrightnessReading
+	lastReading *types.BrightnessReading
 }
 
 func NewBrightnessSensor(cfg *Config, eventSink events.EventSink) (*BrightnessSensor, error) {
@@ -49,7 +41,7 @@ func NewBrightnessSensor(cfg *Config, eventSink events.EventSink) (*BrightnessSe
 }
 
 func (bright *BrightnessSensor) registerEventTypes() {
-	bright.eventSink.RegisterEventType(events.NewEvent("measurement", &BrightnessReading{
+	bright.eventSink.RegisterEventType(events.NewEvent("measurement", &types.BrightnessReading{
 		&tsl2591.SensorData{
 			Lux: 891,
 			Infrared: 283,
@@ -65,7 +57,7 @@ func (bright *BrightnessSensor) Check() (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	bright.lastReading = &BrightnessReading{reading, time.Now().In(time.UTC)}
+	bright.lastReading = &types.BrightnessReading{reading, time.Now().In(time.UTC)}
 	bright.eventSink.Emit("measurement", bright.lastReading)
 	return bright.lastReading, nil
 }

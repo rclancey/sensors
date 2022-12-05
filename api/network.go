@@ -7,29 +7,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rclancey/archer-ax50"
 	"github.com/rclancey/events"
 	//"github.com/rclancey/httpserver/v2"
-	"github.com/rclancey/archer-ax50"
+	"github.com/rclancey/sensors/types"
 )
 
-type HostInfo struct {
-	MAC        string    `json:"mac"`
-	IPv4       string    `json:"ipv4"`
-	Hostname   string    `json:"hostname"`
-	Connection string    `json:"connection"`
-	LastSeen   time.Time `json:"last_seen"`
-	Active     bool      `json:"active"`
-}
-
 type NetworkStatusResponse struct {
-	LastUpdate time.Time   `json:"now"`
-	Hosts      []*HostInfo `json:"hosts"`
-	Active     int         `json:"active"`
+	LastUpdate time.Time         `json:"now"`
+	Hosts      []*types.HostInfo `json:"hosts"`
+	Active     int               `json:"active"`
 }
 
 type NetworkStatus struct {
 	lastUpdate time.Time `json:"now"`
-	hosts map[string]*HostInfo `json:"hosts"`
+	hosts map[string]*types.HostInfo `json:"hosts"`
 	active int `json:"active"`
 	cfg *Config
 	eventSink events.EventSink
@@ -39,7 +31,7 @@ type NetworkStatus struct {
 func NewNetworkStatus(cfg *Config, eventSink events.EventSink) (*NetworkStatus, error) {
 	ns := &NetworkStatus{
 		lastUpdate: time.Now(),
-		hosts: map[string]*HostInfo{},
+		hosts: map[string]*types.HostInfo{},
 		cfg: cfg,
 		eventSink: events.NewPrefixedEventSource("network", eventSink),
 		mutex: &sync.Mutex{},
@@ -50,7 +42,7 @@ func NewNetworkStatus(cfg *Config, eventSink events.EventSink) (*NetworkStatus, 
 
 func (ns *NetworkStatus) registerEventTypes() {
 	now := time.Now()
-	ns.eventSink.RegisterEventType(events.NewEvent("add", &HostInfo{
+	ns.eventSink.RegisterEventType(events.NewEvent("add", &types.HostInfo{
 		MAC: "40:3f:8c:72:bd:a4",
 		IPv4: "129.168.0.100",
 		Hostname: "laptop",
@@ -58,7 +50,7 @@ func (ns *NetworkStatus) registerEventTypes() {
 		LastSeen: now,
 		Active: true,
 	}))
-	ns.eventSink.RegisterEventType(events.NewEvent("drop", &HostInfo{
+	ns.eventSink.RegisterEventType(events.NewEvent("drop", &types.HostInfo{
 		MAC: "40:3f:8c:72:bd:a4",
 		IPv4: "129.168.0.100",
 		Hostname: "laptop",
@@ -66,7 +58,7 @@ func (ns *NetworkStatus) registerEventTypes() {
 		LastSeen: now.Add(-5 * time.Minute),
 		Active: false,
 	}))
-	ns.eventSink.RegisterEventType(events.NewEvent("change", &HostInfo{
+	ns.eventSink.RegisterEventType(events.NewEvent("change", &types.HostInfo{
 		MAC: "40:3f:8c:72:bd:a4",
 		IPv4: "129.168.0.101",
 		Hostname: "laptop",
@@ -105,7 +97,7 @@ func (ns *NetworkStatus) Check() (interface{}, error) {
 		c.MAC = strings.ReplaceAll(strings.ToLower(c.MAC), "-", ":")
 		host := ns.hosts[c.MAC]
 		if host == nil {
-			host = &HostInfo{
+			host = &types.HostInfo{
 				MAC: c.MAC,
 				IPv4: c.IPv4,
 				Hostname: c.Hostname,
@@ -162,7 +154,7 @@ func (ns *NetworkStatus) Check() (interface{}, error) {
 func (ns *NetworkStatus) makeResponse() *NetworkStatusResponse {
 	resp := &NetworkStatusResponse{
 		LastUpdate: ns.lastUpdate,
-		Hosts: make([]*HostInfo, len(ns.hosts)),
+		Hosts: make([]*types.HostInfo, len(ns.hosts)),
 		Active: ns.active,
 	}
 	i := 0

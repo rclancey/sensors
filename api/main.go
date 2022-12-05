@@ -98,7 +98,15 @@ func startup() (*logging.Logger, *H.Server, error) {
 		log.Fatalln("can't create server:", err)
 	}
 
-	eventSink := events.NewEventSink(24 * time.Hour)
+	eventLogFn, err := cfg.Abs("var/log/events.log")
+	if err != nil {
+		log.Println("can't get event log:", err)
+	}
+	eventLog, err := os.OpenFile(eventLogFn, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalln("can't open event log:", err)
+	}
+	eventSink := events.NewLoggedEventSink(events.NewEventSink(24 * time.Hour), eventLog)
 
 	bs, err := NewBrightnessSensor(cfg, eventSink)
 	if err != nil {
@@ -196,11 +204,12 @@ func startup() (*logging.Logger, *H.Server, error) {
 	}))
 
 	srv.PUT("/lights/", H.HandlerFunc(ls.HandlePut))
-	//srv.PUT("/sonos/volume", H.HandlerFunc(sonos.HandleSetVolume))
-	//srv.POST("/sonos/playliist", H.HandlerFunc(sonos.HandleSetPlaylist))
-	//srv.PUT("/sonos/playback", H.HandlerFunc(sonos.SetPlayback))
+	srv.PUT("/sonos/volume", H.HandlerFunc(sonos.HandleSetVolume))
+	srv.POST("/sonos/playliist", H.HandlerFunc(sonos.HandleSetPlaylist))
+	srv.PUT("/sonos/playback", H.HandlerFunc(sonos.HandleSetPlayback))
 
-	srv.GET("/events", H.HandlerFunc(whl.HandleListEventTypes))
+	srv.GET("/event-types", H.HandlerFunc(whl.HandleListEventTypes))
+	srv.GET("/events", H.HandlerFunc(whl.HandleEventLog))
 	srv.GET("/webhooks", H.HandlerFunc(whl.HandleListWebhooks))
 	srv.POST("/webhooks", H.HandlerFunc(whl.HandleAddWebhook))
 	srv.DELETE("/webhooks", H.HandlerFunc(whl.HandleRemoveWebhook))

@@ -72,3 +72,74 @@ div.grid div.nval {
   text-align: right;
   white-space: nowrap;
 }
+
+.tree {
+  font-family: monospace;
+  overflow: auto;
+}
+
+.tree .toggleWrapper {
+  display: inline-block;
+  width: 12px;
+  margin-left: -12px;
+}
+
+.tree .toggle {
+  border: solid transparent 5px;
+  width: 0px;
+}
+
+.tree .toggle.open {
+  position: relative;
+  top: 4px;
+  left: -4px;
+  border-top-color: #666;
+}
+
+.tree .toggle.closed {
+  border-left-color: #666;
+}
+
+.tree .pair {
+  box-sizing: border-box;
+  padding-left: 20px;
+  white-space: nowrap;
+}
+
+.tree .child {
+  margin-left: 24px;
+  border-left: dotted gray 1px;
+}
+
+.tree .key {
+  color: lime;
+  display: inline;
+}
+
+.tree .string {
+  color: fuchsia;
+  display: inline;
+}
+
+.tree .number, .tree .boolean {
+  color: dodgerblue;
+  font-weight: bold;
+  display: inline;
+}
+
+.tree .null {
+  color: orange;
+  font-weight: bold;
+  display: inline;
+}
+
+.tree .comment {
+  color: gray;
+  font-style: italic;
+  display: inline;
+  margin-left: 10px;
+}
+
+.tree .closing {
+  padding-left: 22px;
+}

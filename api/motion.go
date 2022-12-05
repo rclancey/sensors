@@ -11,16 +11,10 @@ import (
 	"github.com/rclancey/events"
 	//"github.com/rclancey/generic"
 	//"github.com/rclancey/httpserver/v2"
+	"github.com/rclancey/sensors/types"
 	"github.com/warthog618/gpiod"
 	"github.com/warthog618/gpiod/device/rpi"
 )
-
-type MotionSensorStatus struct {
-	Now time.Time `json:"now"`
-	LastMotion time.Time `json:"last_motion"`
-	ElapsedTime float64 `json:"elapsed_time"`
-	MotionLog []time.Time `json:"motion_log"`
-}
 
 type MotionSensor struct {
 	cfg *Config
@@ -49,12 +43,12 @@ func NewMotionSensor(cfg *Config, eventSink events.EventSink) (*MotionSensor, er
 
 func (ms *MotionSensor) registerEventTypes() {
 	now := time.Now()
-	ms.eventSink.RegisterEventType(events.NewEvent("movement", &MotionSensorStatus{
+	ms.eventSink.RegisterEventType(events.NewEvent("movement", &types.MotionSensorStatus{
 		Now: now,
 		LastMotion: now,
 		ElapsedTime: 0,
 	}))
-	ms.eventSink.RegisterEventType(events.NewEvent("stillness", &MotionSensorStatus{
+	ms.eventSink.RegisterEventType(events.NewEvent("stillness", &types.MotionSensorStatus{
 		Now: now,
 		LastMotion: now.Add(-5 * time.Minute),
 		ElapsedTime: 300,
@@ -66,7 +60,7 @@ func (ms *MotionSensor) Check() (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	status := &MotionSensorStatus{
+	status := &types.MotionSensorStatus{
 		Now: time.Now().In(time.UTC),
 		LastMotion: ms.lastMotion,
 		ElapsedTime: 0,
