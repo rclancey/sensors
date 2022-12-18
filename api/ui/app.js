@@ -461,8 +461,8 @@ const Network = ({ info }) => {
     <div className="header">Hosts</div>
     <div className="grid">
       ${info.hosts.map((host) => (
-        html`<div key="${host.mac}-key" className="key">${host.mac}</div>
-        <div key="${host.mac}-val" className="val"><${NetworkHost} now=${now} host=${host} /></div>`
+        html`<div key="${host.mac}-val" className="val"><${NetworkHost} now=${now} host=${host} /></div>
+        <div key="${host.mac}-val" className="key">${host.mac}</div>`
       ))}
     </div>
     <${AsOf} now=${info.now} />

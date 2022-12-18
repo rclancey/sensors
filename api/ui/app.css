@@ -16,6 +16,7 @@ body, div {
 }
 
 input[type="checkbox"] {
+  font-size: inherit;
   width: 0.75em;
   height: 0.75em;
 }
@@ -26,9 +27,9 @@ div.status {
 }
 
 div.status>div {
-  padding: 2em;
+  padding: 1em;
   min-width: 300px;
-  max-width: calc(100vw - 4em);
+  max-width: calc(100vw - 2em);
 }
 
 div.header {
@@ -85,19 +86,21 @@ div.grid div.nval {
 }
 
 .tree .toggle {
-  border: solid transparent 5px;
+  border: solid transparent 0.4em;
   width: 0px;
+  position: relative;
 }
 
 .tree .toggle.open {
-  position: relative;
-  top: 4px;
-  left: -4px;
+  top: 0.2em;
+  left: -0.3em;
   border-top-color: #666;
 }
 
 .tree .toggle.closed {
   border-left-color: #666;
+  top: 0;
+  left: -0.1em;
 }
 
 .tree .pair {
