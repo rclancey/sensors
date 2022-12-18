@@ -2,7 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -71,13 +74,28 @@ func NewSonos(cfg *Config, eventSink events.EventSink) (*Sonos, error) {
 	return s, nil
 }
 
-func (s *Sonos) Check() (interface{}, error) {
-	state, err := s.sonos.GetState()
+func (s *Sonos) Check() (state interface{}, err error) {
+	defer func() {
+		rerr := recover()
+		if rerr != nil {
+			state = s.state
+			log.Println("panic getting sonos state:", rerr)
+			switch terr := rerr.(type) {
+			case error:
+				err = terr
+			case string:
+				err = errors.New(terr)
+			default:
+				err = fmt.Errorf("%#v", terr)
+			}
+		}
+	}()
+	state, err = s.sonos.GetState()
 	if err != nil {
-		return nil, err
+		return
 	}
-	s.sonos.ApplyUpdate(state)
-	return state, nil
+	s.sonos.ApplyUpdate(state.(*sonos.State))
+	return
 }
 
 func (s *Sonos) Monitor(interval time.Duration) func() {
