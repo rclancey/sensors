@@ -48,26 +48,38 @@ func NewSonos(cfg *Config, eventSink events.EventSink) (*Sonos, error) {
 				switch *update.State {
 				case sonos.PlayStatePlaying:
 					s.eventSink.Emit("play", s.state)
+					Measure("sonos_playing", nil, 1.0)
 				case sonos.PlayStatePaused:
 					s.eventSink.Emit("pause", s.state)
+					Measure("sonos_playing", nil, 0.0)
 				case sonos.PlayStateStopped:
 					s.eventSink.Emit("stop", s.state)
+					Measure("sonos_playing", nil, 0.0)
 				}
 			}
 			if update.Speed != nil {
 				s.eventSink.Emit("speed", s.state)
+				Measure("sonos_speed", nil, *update.Speed)
 			}
 			if update.Volume != nil || update.Mute != nil {
 				s.eventSink.Emit("volume", s.state)
+				if update.Mute != nil && *update.Mute {
+					Measure("sonos_volume", nil, 0.0)
+				} else if update.Volume != nil {
+					Measure("sonos_volume", nil, float64(*update.Volume))
+				}
 			}
 			if update.PlayMode != nil {
 				s.eventSink.Emit("mode", s.state)
+				Measure("sonos_playmode", nil, float64(*update.PlayMode))
 			}
 			if update.Tracks != nil {
 				s.eventSink.Emit("queue", s.state)
+				Measure("sonos_queue_size", nil, float64(len(update.Tracks)))
 			}
 			if update.Index != nil {
 				s.eventSink.Emit("track", s.state)
+				Measure("sonos_queue_index", nil, float64(*update.Index))
 			}
 		}
 	}()

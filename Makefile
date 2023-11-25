@@ -43,10 +43,11 @@ else
 endif
 
 GOSRC := $(shell find * -type f -name "*.go")
+UISRC := $(shell find api/ui -type f)
 
 all: compile
 
-$(BUILDDIR)/$(PKGNAME)/bin/%: $(GOSRC) go.mod go.sum
+$(BUILDDIR)/$(PKGNAME)/bin/%: $(UISRC) $(GOSRC) go.mod go.sum
 	mkdir -p $(BUILDDIR)/$(PKGNAME)/bin
 	env CC=$(CC) CXX=$(CXX) GOARCH=$(GOARCH) GOOS=$(GOOS) CGO_ENABLED=$(CGO_ENABLED) go build -ldflags "$(LDFLAGS) $(ALLBUILDFLAGS)" -o $@ cmd/$*.go
 

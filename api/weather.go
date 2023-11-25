@@ -97,6 +97,23 @@ func (v *ValueWithUnits) GetValue() float64 {
 	return v.Value
 }
 
+func k2C(k float64) float64 {
+	return k - 273.15
+}
+
+func k2F(k float64) float64 {
+	c := k2C(k)
+	return c * 1.8 + 32
+}
+
+func dayHour(epochSec int64) float64 {
+	t := time.Unix(epochSec, 0)
+	h := float64(t.Hour())
+	h += float64(t.Minute()) / 60.0
+	h += float64(t.Second()) / 3600.0
+	return h
+}
+
 func (w *Weather) Check() (interface{}, error) {
 	if w.lat == 0 && w.lon == 0 {
 		log.Println("no location for weather")
@@ -136,6 +153,35 @@ func (w *Weather) Check() (interface{}, error) {
 	for _, alert := range forecast.Alerts {
 		w.eventSink.Emit("alert", alert)
 	}
+	Measure("weather_pressure", map[string]string{"units": "hPa"}, forecast.Current.PressureHPa)
+	Measure("weather_pressure", map[string]string{"units": "inHg"}, forecast.Current.PressureHPa * 0.02953)
+	Measure("weather_pressure", map[string]string{"units": "psi"}, forecast.Current.PressureHPa * 0.014503774)
+	Measure("weather_humidity", map[string]string{"units": "pct"}, forecast.Current.HumidityPct)
+	Measure("weather_dewpoint", map[string]string{"units": "K"}, forecast.Current.DewPointK)
+	Measure("weather_dewpoint", map[string]string{"units": "C"}, k2C(forecast.Current.DewPointK))
+	Measure("weather_dewpoint", map[string]string{"units": "F"}, k2F(forecast.Current.DewPointK))
+	Measure("weather_clouds", map[string]string{"units": "pct"}, forecast.Current.CloudPct)
+	Measure("weather_uv_index", nil, forecast.Current.UVIndex)
+	Measure("weather_visibility", map[string]string{"units": "m"}, forecast.Current.VisibilityM)
+	Measure("weather_visibility", map[string]string{"units": "mi"}, forecast.Current.VisibilityM / 1609.344)
+	Measure("weather_windspeed", map[string]string{"units": "m/s"}, forecast.Current.WindSpeedMPS)
+	Measure("weather_windspeed", map[string]string{"units": "mph"}, forecast.Current.WindSpeedMPS * 3600 / 1609.344)
+	Measure("weather_windgust", map[string]string{"units": "m/s"}, forecast.Current.WindGustMPS)
+	Measure("weather_windgust", map[string]string{"units": "mph"}, forecast.Current.WindGustMPS * 3600 / 1609.344)
+	Measure("weather_wind_dir", map[string]string{"units": "deg"}, forecast.Current.WindDeg)
+	Measure("weather_temp", map[string]string{"units": "K"}, forecast.Current.TempK)
+	Measure("weather_temp", map[string]string{"units": "C"}, k2C(forecast.Current.TempK))
+	Measure("weather_temp", map[string]string{"units": "F"}, k2F(forecast.Current.TempK))
+	Measure("weather_feelslike", map[string]string{"units": "K"}, forecast.Current.FeelsLikeK)
+	Measure("weather_feelslike", map[string]string{"units": "C"}, k2C(forecast.Current.FeelsLikeK))
+	Measure("weather_feelslike", map[string]string{"units": "F"}, k2F(forecast.Current.FeelsLikeK))
+	Measure("weather_precipitation", map[string]string{"units": "pct"}, forecast.Current.PrecipitationPct)
+	Measure("weather_rain_lasthour", map[string]string{"units": "mm"}, forecast.Current.Rain.LastHourMm)
+	Measure("weather_rain_lasthour", map[string]string{"units": "in"}, forecast.Current.Rain.LastHourMm / 25.4)
+	Measure("weather_rain_last3hours", map[string]string{"units": "mm"}, forecast.Current.Rain.Last3HoursMm)
+	Measure("weather_rain_last3hours", map[string]string{"units": "in"}, forecast.Current.Rain.Last3HoursMm / 25.4)
+	Measure("weather_sunrise_hr", nil, dayHour(forecast.Current.SunriseEpochS))
+	Measure("weather_sunset_hr", nil, dayHour(forecast.Current.SunsetEpochS))
 	return forecast, nil
 }
 

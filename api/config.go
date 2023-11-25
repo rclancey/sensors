@@ -9,10 +9,13 @@ import (
 
 	"github.com/rclancey/argparse"
 	"github.com/rclancey/httpserver/v2"
+	"github.com/rclancey/httpserver/v2/auth"
 )
 
 type Config struct {
 	*httpserver.ServerConfig
+	Auth auth.AuthConfig `json:"auth"`
+	DB string `json:"database"`
 	Network *httpserver.NetworkConfig `json:"network"`
 	Location *Location `json:"location"`
 	OpenWeatherMapAPIKey string `json:"openweathermap"`
@@ -56,6 +59,11 @@ func (cfg *Config) Init() error {
 	if err != nil {
 		return err
 	}
+	fn, err := httpserver.MakeRootAbs(cfg.ServerConfig.ServerRoot, cfg.DB)
+	if err != nil {
+		return err
+	}
+	cfg.DB = fn
 	return nil
 }
 

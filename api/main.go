@@ -2,6 +2,7 @@ package api
 
 import (
 	"embed"
+	"encoding/json"
 	//"io/fs"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/rclancey/events"
 	H "github.com/rclancey/httpserver/v2"
+	"github.com/rclancey/httpserver/v2/auth"
 	"github.com/rclancey/logging"
 )
 
@@ -98,6 +100,22 @@ func startup() (*logging.Logger, *H.Server, error) {
 		log.Fatalln("can't create server:", err)
 	}
 
+	cfgData, err := json.Marshal(cfg)
+	if err != nil {
+		log.Fatalln(err)
+	} else {
+		log.Println(string(cfgData))
+	}
+	userSrc, err := NewUserSource(cfg.DB)
+	if err != nil {
+		log.Fatalln("can't open user db:", err)
+	}
+	authen, err := auth.NewAuthenticator(cfg.Auth, userSrc)
+	if err != nil {
+		log.Fatalln("can't configure authenticator:", err)
+	}
+	authmw := authen.MakeMiddleware()
+
 	eventLogFn, err := cfg.Abs("var/log/events.log")
 	if err != nil {
 		log.Println("can't get event log:", err)
@@ -108,7 +126,13 @@ func startup() (*logging.Logger, *H.Server, error) {
 	}
 	eventSink := events.NewLoggedEventSink(events.NewEventSink(24 * time.Hour), eventLog)
 
-	bs, err := NewBrightnessSensor(cfg, eventSink)
+	weather, err := NewWeather(cfg, eventSink)
+	if err != nil {
+		log.Fatalln("can't create weather station:", err)
+	}
+	weather.Monitor(15 * time.Minute)
+
+	bs, err := NewBrightnessSensor(cfg, eventSink, weather)
 	if err != nil {
 		log.Fatalln("can't create brightness sensor:", err)
 	}
@@ -143,12 +167,6 @@ func startup() (*logging.Logger, *H.Server, error) {
 		log.Fatalln("can't create network:", err)
 	}
 	ns.Monitor(5 * time.Minute)
-
-	weather, err := NewWeather(cfg, eventSink)
-	if err != nil {
-		log.Fatalln("can't create weather station:", err)
-	}
-	weather.Monitor(15 * time.Minute)
 
 	whl, err := NewWebhookList(cfg, eventSink)
 	if err != nil {
@@ -186,6 +204,31 @@ func startup() (*logging.Logger, *H.Server, error) {
 	}
 	*/
 	errlog.Infoln("server starting...")
+	authen.LoginAPI(srv.Prefix("/auth"))
+	srv.GET("/whoami", H.HandlerFunc(func(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+		claims, err := authen.JWT.GetClaimsFromRequest(r)
+		if err != nil {
+			return map[string]string{
+				"error": err.Error(),
+			}, nil
+		}
+		token, err := authen.JWT.MakeToken(claims)
+		if err != nil {
+			return map[string]string{
+				"error": err.Error(),
+			}, nil
+		}
+		err = authen.JWT.SetCookie(w, claims)
+		if err != nil {
+			return map[string]string{
+				"errror": err.Error(),
+			}, nil
+		}
+		return map[string]interface{}{
+			"claims": claims,
+			"token": token,
+		}, nil
+	}))
 	srv.GET("/brightness/status", H.HandlerFunc(bs.HandleRead))
 	srv.GET("/motion/status", H.HandlerFunc(ms.HandleRead))
 	srv.GET("/lights/status", H.HandlerFunc(ls.HandleRead))
@@ -204,15 +247,17 @@ func startup() (*logging.Logger, *H.Server, error) {
 	}))
 
 	srv.PUT("/lights/", H.HandlerFunc(ls.HandlePut))
-	srv.PUT("/sonos/volume", H.HandlerFunc(sonos.HandleSetVolume))
-	srv.POST("/sonos/playliist", H.HandlerFunc(sonos.HandleSetPlaylist))
-	srv.PUT("/sonos/playback", H.HandlerFunc(sonos.HandleSetPlayback))
+	srv.PUT("/sonos/volume", authmw(H.HandlerFunc(sonos.HandleSetVolume)))
+	srv.POST("/sonos/playliist", authmw(H.HandlerFunc(sonos.HandleSetPlaylist)))
+	srv.PUT("/sonos/playback", authmw(H.HandlerFunc(sonos.HandleSetPlayback)))
 
 	srv.GET("/event-types", H.HandlerFunc(whl.HandleListEventTypes))
 	srv.GET("/events", H.HandlerFunc(whl.HandleEventLog))
 	srv.GET("/webhooks", H.HandlerFunc(whl.HandleListWebhooks))
-	srv.POST("/webhooks", H.HandlerFunc(whl.HandleAddWebhook))
-	srv.DELETE("/webhooks", H.HandlerFunc(whl.HandleRemoveWebhook))
+	srv.POST("/webhooks", authmw(H.HandlerFunc(whl.HandleAddWebhook)))
+	srv.DELETE("/webhooks", authmw(H.HandlerFunc(whl.HandleRemoveWebhook)))
+
+	srv.GET("/metrics", MetricsEndpoint())
 
 	//srv.GET("/", http.FileServer(http.FS(uifs)))
 	errlog.Infoln("server ready")

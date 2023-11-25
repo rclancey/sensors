@@ -1,9 +1,11 @@
-import { Fragment, h, Component, render } from 'https://unpkg.com/preact@latest?module';
-import { useState, useEffect, useCallback, useMemo } from 'https://unpkg.com/preact@latest/hooks/dist/hooks.module.js?module';
+import { Fragment, h, Component, render, createContext } from 'https://unpkg.com/preact@latest?module';
+import { useState, useEffect, useCallback, useMemo, useContext } from 'https://unpkg.com/preact@latest/hooks/dist/hooks.module.js?module';
 import htm from 'https://unpkg.com/htm?module';
 
 // Initialize htm with Preact
 const html = htm.bind(h);
+
+const AuthContext = createContext({});
 
 const datefmt = Intl.DateTimeFormat('en-US', { timeStyle: 'medium', hour12: false });
 
@@ -366,17 +368,39 @@ const isOn = (device) => {
 }
 */
 
+class API {
+  constructor(token, logout) {
+    this.token = token;
+    this.logout = logout;
+  }
+
+  async fetch(uri, opts) {
+    if (!opts.headers) {
+      opts.headers = {};
+    }
+    opts.credentials = 'same-origin';
+    opts.headers['Authorization'] = `Bearer ${this.token}`;
+    return fetch(uri, opts).then(resp => {
+      if (resp.status === 401) {
+        this.logout();
+      }
+      return resp;
+    });
+  }
+}
+
 const Light = ({ name, light }) => {
+  const { api } = useContext(AuthContext);
   const [state, setState] = useState(light);
   useEffect(() => setState(light), [light]);
   const turnOn = useCallback(() => {
-    fetch(`/lights/${name}?value=100`, { method: 'PUT' })
+    api.fetch(`/lights/${name}?value=100`, { method: 'PUT' })
       .then(() => setState(100));
-  }, [name]);
+  }, [api, name]);
   const turnOff = useCallback(() => {
-    fetch(`/lights/${name}?value=0`, { method: 'PUT' })
+    api.fetch(`/lights/${name}?value=0`, { method: 'PUT' })
       .then(() => setState(0));
-  }, [name])
+  }, [api, name])
   const onToggle = useCallback(() => {
     if (state > 0) {
       turnOff();
@@ -528,12 +552,13 @@ const Weather = ({ weather }) => {
 };
 
 const Status = () => {
+  const { api } = useContext(AuthContext);
   const [state, setState] = useState(null);
   const onUpdate = useCallback(() => {
-    fetch('/status', { method: 'GET' })
+    api.fetch('/status', { method: 'GET' })
       .then((resp) => resp.json())
       .then(setState);
-  }, []);
+  }, [api]);
   useEffect(() => {
     onUpdate();
     const interval = setInterval(() => onUpdate(), [60000]);
@@ -544,10 +569,10 @@ const Status = () => {
   }
   return html`<div>
     <div className="status">
+      <${Lights} lights=${state.lights} />
       <${Weather} weather=${state.weather} />
       <${Brightness} light=${state.brightness} />
       <${Motion} motion=${state.motion} />
-      <${Lights} lights=${state.lights} />
       <${AppleTV} info=${state.appletv} />
       <${Sonos} info=${state.sonos} />
       <${Network} info=${state.network} />
@@ -557,8 +582,76 @@ const Status = () => {
   </div>`;
 };
 
+const Login = ({ children }) => {
+  const { token } = useContext(AuthContext);
+  if (token) {
+    return children;
+  }
+  return html`<${LoginForm} />`;
+}
+
+const LoginForm = () => {
+  const { loginError, login } = useContext(AuthContext);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const onChangeUsername = useCallback((evt) => setUsername(evt.target.value), []);
+  const onChangePassword = useCallback((evt) => setPassword(evt.target.value), []);
+  const onLogin = useCallback(() => login(username, password), [login, username, password]);
+  return html`<div>
+    Username: <input type="text" name="username" value=${username} onInput=${onChangeUsername} /><br />
+    Password: <input type="password" name="password" value=${password} onInput=${onChangePassword} /><br />
+    <input type="button" value="Login" onClick=${onLogin} />
+  </div>`;
+};
+
+const AuthProvider = ({ children }) => {
+  const [initialized, setInitialized] = useState(false);
+  const [token, setToken] = useState(null);
+  const [loginError, setLoginError] = useState(null);
+  const login = useCallback((username, password) => {
+    fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        'username': username,
+        'password': password,
+      }),
+    })
+      .then(resp => {
+        if (resp.status !== 200) {
+          resp.text().then(setLoginError);
+        } else {
+          resp.json().then(obj => { setToken(obj); setLoginError(null); });
+        }
+      });
+  }, []);
+  const logout = useCallback(() => {
+    setToken(null);
+  }, []);
+  const api = useMemo(() => new API(token ? token.token : '', logout), [token, logout]);
+  const ctx = useMemo(() => ({
+    token,
+    loginError,
+    login,
+    logout,
+    api,
+  }), [token, loginError, login, logout]);
+  if (!initialized) {
+    fetch('/whoami', { method: 'GET' })
+      .then((resp) => resp.json())
+      .then((token) => {
+        if (token.token) {
+          setToken(token);
+        }
+        setInitialized(true);
+      })
+    return html`<div />`;
+  }
+  return html`<${AuthContext.Provider} value=${ctx}>${children}</${AuthContext.Provider}>`;
+};
+
 function App (props) {
-  return html`<${Status} />`;
+  return html`<${AuthProvider}><${Login}><${Status} /></${Login}></${AuthProvider}>`;
   //return html`<h1>Hello ${props.name}!</h1>`;
 }
 

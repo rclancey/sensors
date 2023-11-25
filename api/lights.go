@@ -55,6 +55,7 @@ func (ls *LightStatus) update(dev kasa.SmartDevice) {
 	} else {
 		xdev.State = 0
 	}
+	Measure("lights", map[string]string{"alias": xdev.Alias()}, float64(xdev.State))
 	ls.lock.Lock()
 	orig := ls.devices[dev.Alias()]
 	ls.devices[xdev.Alias()] = xdev
@@ -69,6 +70,7 @@ func (ls *LightStatus) update(dev kasa.SmartDevice) {
 }
 
 func (ls *LightStatus) lose(alias string) {
+	Measure("lights", map[string]string{"alias": alias}, float64(-1))
 	ls.lock.Lock()
 	orig := ls.devices[alias]
 	ls.lock.Unlock()

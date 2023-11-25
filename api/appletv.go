@@ -163,6 +163,11 @@ func (atv *AppleTV) updateState(update *types.AppleTVStatus) {
 			atv.eventSink.Emit("content", update)
 		}
 	}
+	if atv.state.DeviceState == "playing" {
+		Measure("appletv_playing", nil, 1.0)
+	} else {
+		Measure("appletv_playing", nil, 0.0)
+	}
 }
 
 func (atv *AppleTV) Check() (interface{}, error) {

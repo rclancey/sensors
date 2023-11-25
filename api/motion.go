@@ -3,6 +3,7 @@ package api
 import (
 	//"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	//"os/exec"
 	//"path/filepath"
@@ -69,6 +70,7 @@ func (ms *MotionSensor) Check() (interface{}, error) {
 		ms.lastMotion = status.Now
 		ms.lastStillness = 0
 		status.LastMotion = status.Now
+		Count("motion_count", nil)
 	} else {
 		elapsed := status.Now.Sub(status.LastMotion)
 		status.ElapsedTime = elapsed.Seconds()
@@ -95,6 +97,7 @@ func (ms *MotionSensor) Check() (interface{}, error) {
 			}
 		}
 	}
+	Measure("motion_elapsed_time", map[string]string{"units": "sec"}, math.Min(3600.0, status.ElapsedTime))
 	return status, nil
 }
 

@@ -139,6 +139,7 @@ func (ns *NetworkStatus) Check() (interface{}, error) {
 				ns.eventSink.Emit("change", host)
 			}
 		}
+		Measure("host_active", map[string]string{"mac": c.MAC}, 1.0)
 	}
 	for k := range missing {
 		host := ns.hosts[k]
@@ -146,6 +147,7 @@ func (ns *NetworkStatus) Check() (interface{}, error) {
 			host.Active = false
 			ns.eventSink.Emit("drop", host)
 		}
+		Measure("host_active", map[string]string{"mac": k}, 0.0)
 	}
 	resp := ns.makeResponse()
 	return resp, nil
